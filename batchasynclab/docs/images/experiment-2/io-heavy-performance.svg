@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="772" viewBox="0 0 960 772" role="img" aria-labelledby="title description">
+<style>text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;fill:#172033}.title{font-size:24px;font-weight:700}.subtitle{font-size:13px;fill:#64748b}.axis{font-size:12px;fill:#64748b}.label{font-size:13px;font-weight:600}.value{font-size:13px;font-weight:700}.grid{stroke:#dbe3ef;stroke-width:1}.frame{fill:#fff;stroke:#cbd5e1;stroke-width:1}</style>
+<title id="title">I/O-heavy: Platform vs Virtual</title>
+<desc id="description">Comparison chart generated from batchasynclab experiment results.</desc>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text class="title" x="48" y="38">I/O-heavy: Platform vs Virtual</text>
+<text class="subtitle" x="48" y="62">Spring Batch Thread Efficiency</text>
+<line x1="48" y1="84" x2="70" y2="84" stroke="#2563eb" stroke-width="3"/>
+<circle cx="59" cy="84" r="4" fill="#2563eb"/>
+<text class="axis" x="78" y="88">Platform</text>
+<line x1="166" y1="84" x2="188" y2="84" stroke="#f97316" stroke-width="3"/>
+<circle cx="177" cy="84" r="4" fill="#f97316"/>
+<text class="axis" x="196" y="88">Virtual</text>
+<text class="label" x="48" y="124">Execution time (ms)</text>
+<rect class="frame" x="92" y="150" width="826" height="197"/>
+<line class="grid" x1="92" y1="347.0" x2="918" y2="347.0"/>
+<text class="axis" x="82" y="351.0" text-anchor="end">0</text>
+<line class="grid" x1="92" y1="297.8" x2="918" y2="297.8"/>
+<text class="axis" x="82" y="301.8" text-anchor="end">341.0</text>
+<line class="grid" x1="92" y1="248.5" x2="918" y2="248.5"/>
+<text class="axis" x="82" y="252.5" text-anchor="end">682.1</text>
+<line class="grid" x1="92" y1="199.2" x2="918" y2="199.2"/>
+<text class="axis" x="82" y="203.2" text-anchor="end">1.0k</text>
+<line class="grid" x1="92" y1="150.0" x2="918" y2="150.0"/>
+<text class="axis" x="82" y="154.0" text-anchor="end">1.4k</text>
+<line class="grid" x1="92.0" y1="150" x2="92.0" y2="347"/>
+<text class="axis" x="92.0" y="371" text-anchor="middle">4</text>
+<line class="grid" x1="505.0" y1="150" x2="505.0" y2="347"/>
+<text class="axis" x="505.0" y="371" text-anchor="middle">40</text>
+<line class="grid" x1="918.0" y1="150" x2="918.0" y2="347"/>
+<text class="axis" x="918.0" y="371" text-anchor="middle">400</text>
+<text class="axis" x="505.0" y="394" text-anchor="middle">Concurrency</text>
+<polyline points="92.0,173.9 505.0,329.1 918.0,344.0" fill="none" stroke="#2563eb" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="92.0" cy="173.9" r="5" fill="#2563eb"/>
+<text class="value" x="92.0" y="163.9" text-anchor="middle">1.2k</text>
+<circle cx="505.0" cy="329.1" r="5" fill="#2563eb"/>
+<text class="value" x="505.0" y="319.1" text-anchor="middle">124</text>
+<circle cx="918.0" cy="344.0" r="5" fill="#2563eb"/>
+<text class="value" x="918.0" y="334.0" text-anchor="middle">21</text>
+<polyline points="92.0,171.1 505.0,329.4 918.0,345.1" fill="none" stroke="#f97316" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="92.0" cy="171.1" r="5" fill="#f97316"/>
+<text class="value" x="92.0" y="189.1" text-anchor="middle">1.2k</text>
+<circle cx="505.0" cy="329.4" r="5" fill="#f97316"/>
+<text class="value" x="505.0" y="347.4" text-anchor="middle">122</text>
+<circle cx="918.0" cy="345.1" r="5" fill="#f97316"/>
+<text class="value" x="918.0" y="363.1" text-anchor="middle">13</text>
+<text class="label" x="48" y="454">Throughput (items/s)</text>
+<rect class="frame" x="92" y="480" width="826" height="197"/>
+<line class="grid" x1="92" y1="677.0" x2="918" y2="677.0"/>
+<text class="axis" x="82" y="681.0" text-anchor="end">0</text>
+<line class="grid" x1="92" y1="627.8" x2="918" y2="627.8"/>
+<text class="axis" x="82" y="631.8" text-anchor="end">8.6k</text>
+<line class="grid" x1="92" y1="578.5" x2="918" y2="578.5"/>
+<text class="axis" x="82" y="582.5" text-anchor="end">17.2k</text>
+<line class="grid" x1="92" y1="529.2" x2="918" y2="529.2"/>
+<text class="axis" x="82" y="533.2" text-anchor="end">25.8k</text>
+<line class="grid" x1="92" y1="480.0" x2="918" y2="480.0"/>
+<text class="axis" x="82" y="484.0" text-anchor="end">34.5k</text>
+<line class="grid" x1="92.0" y1="480" x2="92.0" y2="677"/>
+<text class="axis" x="92.0" y="701" text-anchor="middle">4</text>
+<line class="grid" x1="505.0" y1="480" x2="505.0" y2="677"/>
+<text class="axis" x="505.0" y="701" text-anchor="middle">40</text>
+<line class="grid" x1="918.0" y1="480" x2="918.0" y2="677"/>
+<text class="axis" x="918.0" y="701" text-anchor="middle">400</text>
+<text class="axis" x="505.0" y="724" text-anchor="middle">Concurrency</text>
+<polyline points="92.0,675.1 505.0,658.6 918.0,568.1" fill="none" stroke="#2563eb" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="92.0" cy="675.1" r="5" fill="#2563eb"/>
+<text class="value" x="92.0" y="665.1" text-anchor="middle">333</text>
+<circle cx="505.0" cy="658.6" r="5" fill="#2563eb"/>
+<text class="value" x="505.0" y="648.6" text-anchor="middle">3.2k</text>
+<circle cx="918.0" cy="568.1" r="5" fill="#2563eb"/>
+<text class="value" x="918.0" y="558.1" text-anchor="middle">19.0k</text>
+<polyline points="92.0,675.1 505.0,658.3 918.0,501.1" fill="none" stroke="#f97316" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="92.0" cy="675.1" r="5" fill="#f97316"/>
+<text class="value" x="92.0" y="693.1" text-anchor="middle">328</text>
+<circle cx="505.0" cy="658.3" r="5" fill="#f97316"/>
+<text class="value" x="505.0" y="676.3" text-anchor="middle">3.3k</text>
+<circle cx="918.0" cy="501.1" r="5" fill="#f97316"/>
+<text class="value" x="918.0" y="519.1" text-anchor="middle">30.8k</text>
+</svg>
