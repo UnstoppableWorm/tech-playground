@@ -1,0 +1,80 @@
+type Query {
+    aggregate(input: AggregationQueryInput!): AggregationResult!
+}
+
+input AggregationQueryInput {
+    model: String!
+    view: String!
+    mode: QueryMode!
+    fromInclusive: String!
+    toExclusive: String!
+    # Backward-compatible shorthand: every entry becomes an AND-ed IN predicate.
+    filters: [AggregationFilterInput!] = []
+    where: AggregationPredicateInput
+    having: AggregationPredicateInput
+}
+
+input AggregationFilterInput {
+    field: String!
+    values: [String!]!
+}
+
+input AggregationPredicateInput {
+    operator: AggregationPredicateOperator!
+    field: String
+    value: String
+    values: [String!]
+    lower: String
+    upper: String
+    children: [AggregationPredicateInput!]
+    name: String
+    arguments: [AggregationFilterArgumentInput!]
+}
+
+input AggregationFilterArgumentInput {
+    name: String!
+    values: [String!]!
+}
+
+enum AggregationPredicateOperator {
+    AND
+    OR
+    EQ
+    NE
+    GT
+    GTE
+    LT
+    LTE
+    IN
+    BETWEEN
+    LIKE
+    PREFIX
+    IS_NULL
+    IS_NOT_NULL
+    CUSTOM
+}
+
+enum QueryMode {
+    POSTGRES_RAW
+    POSTGRES_BATCH_HYBRID
+    CLICKHOUSE_HYBRID
+}
+
+type AggregationResult {
+    model: String!
+    view: String!
+    mode: QueryMode!
+    aggregateCoveredUntil: String
+    rows: [AggregationRow!]!
+}
+
+type AggregationRow {
+    bucket: String!
+    dimensions: [AggregationValue!]!
+    measures: [AggregationValue!]!
+}
+
+type AggregationValue {
+    name: String!
+    value: String!
+}

@@ -1,0 +1,23 @@
+{
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  "tasks.max": "1",
+  "database.hostname": "postgres",
+  "database.port": "5432",
+  "database.user": "olap",
+  "database.password": "olap",
+  "database.dbname": "olap_lab",
+  "topic.prefix": "olap",
+  "plugin.name": "pgoutput",
+  "slot.name": "olap_medical_history_slot",
+  "publication.name": "olap_publication",
+  "publication.autocreate.mode": "disabled",
+  "table.include.list": "olap.medical_history",
+  "snapshot.mode": "initial",
+  "heartbeat.interval.ms": "10000",
+  "time.precision.mode": "isostring",
+  "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "key.converter.schemas.enable": "false",
+  "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "value.converter.schemas.enable": "false",
+  "tombstones.on.delete": "false"
+}
