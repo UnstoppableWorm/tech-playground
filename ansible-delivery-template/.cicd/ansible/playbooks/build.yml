@@ -3,8 +3,100 @@
   hosts: localhost
   connection: local
   gather_facts: false
-  roles:
-    - role: build_image
-      vars:
-        harbor_username: "{{ lookup('ansible.builtin.env', 'HARBOR_USERNAME') }}"
-        harbor_password: "{{ lookup('ansible.builtin.env', 'HARBOR_PASSWORD') }}"
+  vars:
+    harbor_username: "{{ lookup('ansible.builtin.env', 'HARBOR_USERNAME') }}"
+    harbor_password: "{{ lookup('ansible.builtin.env', 'HARBOR_PASSWORD') }}"
+  pre_tasks:
+    - name: Validate selected country, environment, and image version
+      ansible.builtin.assert:
+        that:
+          - pipeline.country == country
+          - deployment_environment.code == deploy_env
+          - release.app_name | length > 0
+          - release.harbor.registry | length > 0
+          - release.harbor.project | length > 0
+          - release.image_name | length > 0
+          - image_version | default('') is match('^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
+          - harbor_username | default('') | length > 0
+          - harbor_password | default('') | length > 0
+        fail_msg: Check country, deploy environment, image_version, Harbor settings, and Harbor secrets.
+  tasks:
+    - name: Resolve the immutable versioned image name
+      ansible.builtin.set_fact:
+        release_repository: "{{ release.harbor.registry }}/{{ release.harbor.project }}/{{ release.image_name }}"
+        release_image: "{{ release.harbor.registry }}/{{ release.harbor.project }}/{{ release.image_name }}:{{ image_version }}"
+        release_revision: "{{ image_revision | default(image_version, true) }}"
+        resolved_project_root: "{{ project_root | default(playbook_dir ~ '/../../..', true) }}"
+        resolved_dockerfile_path: "{{ (project_root | default(playbook_dir ~ '/../../..', true)) }}/Dockerfile"
+
+    - name: Ensure the Docker build context exists
+      ansible.builtin.stat:
+        path: "{{ resolved_dockerfile_path }}"
+      register: dockerfile_stat
+
+    - name: Stop when the Docker build context is incomplete
+      ansible.builtin.assert:
+        that:
+          - dockerfile_stat.stat.exists
+        fail_msg: "Dockerfile not found at {{ resolved_dockerfile_path }}."
+
+    - name: Verify Docker is available on the build runner
+      ansible.builtin.command:
+        argv:
+          - docker
+          - version
+      changed_when: false
+
+    - name: Login to Harbor from the build runner
+      ansible.builtin.command:
+        argv:
+          - docker
+          - login
+          - "{{ release.harbor.registry }}"
+          - --username
+          - "{{ harbor_username }}"
+          - --password-stdin
+        stdin: "{{ harbor_password }}"
+      no_log: true
+      changed_when: true
+
+    - name: Build the immutable versioned image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - build
+          - --pull
+          - --file
+          - "{{ resolved_dockerfile_path }}"
+          - --tag
+          - "{{ release_image }}"
+          - --label
+          - "org.opencontainers.image.version={{ image_version }}"
+          - --label
+          - "org.opencontainers.image.revision={{ release_revision }}"
+          - --build-arg
+          - "APP_VERSION={{ image_version }}"
+          - "{{ resolved_project_root }}"
+      changed_when: true
+
+    - name: Verify the local image has the requested version tag
+      ansible.builtin.command:
+        argv:
+          - docker
+          - image
+          - inspect
+          - "{{ release_image }}"
+      changed_when: false
+
+    - name: Push the immutable versioned image to Harbor
+      ansible.builtin.command:
+        argv:
+          - docker
+          - image
+          - push
+          - "{{ release_image }}"
+      changed_when: true
+
+    - name: Report the published image version
+      ansible.builtin.debug:
+        msg: "Published {{ release_image }} for {{ country }}/{{ deploy_env }}."

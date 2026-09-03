@@ -2,7 +2,7 @@
 
 신규 클라우드 환경으로 VM을 이관할 때, GitLab CI 안에 섞여 있던 권역별·환경별 설정과 반복된 배포 스테이지를 분리한 구조를 GitHub Actions용으로 옮긴 템플릿입니다.
 
-GitHub Actions는 수동 실행, 시크릿 주입, runner 선택만 담당합니다. 실제 Harbor 로그인, 이미지 빌드와 push, VM 접속, 이미지 pull, Compose 배포 흐름은 Ansible 플레이북으로 고정해 여러 애플리케이션이 같은 절차를 재사용할 수 있게 합니다.
+GitHub Actions는 수동 실행, 시크릿 주입, runner 선택만 담당합니다. 실제 Harbor 로그인, 이미지 버저닝, 이미지 빌드와 push, VM 접속, 지정 버전 pull, 기존 이미지 정리, Compose 배포 흐름은 Ansible 플레이북으로 고정해 여러 애플리케이션이 같은 절차를 재사용할 수 있게 합니다.
 
 이 디렉터리는 현재 워크스페이스에서는 하위 프로젝트입니다. 별도 저장소로 분리하면 아래 구조가 저장소 루트 기준으로 그대로 동작합니다.
 
@@ -20,9 +20,6 @@ GitHub Actions는 수동 실행, 시크릿 주입, runner 선택만 담당합니
 │   │   ├── playbooks/                    # 모든 환경에서 재사용
 │   │   │   ├── build.yml
 │   │   │   └── deploy.yml
-│   │   ├── roles/
-│   │   │   ├── build_image/
-│   │   │   └── deploy_container/
 │   │   ├── templates/
 │   │   └── vars/                         # 국가 + 환경별 값
 │   │       ├── kr/{stg,prd}.yml
@@ -51,7 +48,7 @@ GitHub Actions는 수동 실행, 시크릿 주입, runner 선택만 담당합니
 
 ## GitHub Actions 흐름
 
-workflow_dispatch에서 country, deploy_env, release_mode, release_tag을 선택하면 다음 파일이 함께 주입됩니다.
+workflow_dispatch에서 country, deploy_env, release_mode, image_version을 선택하면 다음 파일이 함께 주입됩니다.
 
 ~~~text
 kr + stg
@@ -63,6 +60,24 @@ kr + stg
 ~~~
 
 GitLab의 build_kr, deploy_kr 같은 국가별 job은 GitHub Actions의 입력값과 .cicd/pipeline/kr.yml로 대체했습니다. 환경별 runner 메타데이터는 .cicd/vars/{stg,prd}.yml에서 읽어 build/deploy job의 runs-on으로 사용합니다.
+
+## 빌드와 배포 절차
+
+build.yml은 제공된 country, deploy_env, image_version으로 변수 조합을 검증한 뒤 아래 순서로 실행합니다.
+
+1. Harbor 이미지 이름과 불변 버전 태그를 조합합니다.
+2. Dockerfile과 Docker CLI를 확인하고 Harbor에 로그인합니다.
+3. 버전과 Git revision OCI label을 넣어 이미지를 빌드합니다.
+4. 로컬 이미지 태그를 검증하고 Harbor에 version tag를 push합니다.
+
+deploy.yml은 같은 country, deploy_env, image_version을 다시 받아 inventory의 대상 VM 그룹으로만 실행합니다.
+
+1. Harbor에 로그인하고 지정한 version tag를 직접 pull합니다.
+2. 기존 대상 컨테이너가 사용 중인 이미지 ID를 기록합니다.
+3. 해당 국가·환경용 Compose 파일과 런타임 변수를 렌더링하고 컨테이너를 강제 재생성합니다.
+4. 새 릴리스 헬스체크가 성공한 뒤, 이전 대상 이미지가 다른 컨테이너에서 사용 중이지 않을 때만 제거합니다.
+
+새 이미지 pull 또는 헬스체크가 실패하면 이전 이미지는 제거하지 않습니다.
 
 ## Docker 호환성
 
@@ -93,7 +108,7 @@ python -m pip install ansible-core==2.17.7
 export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
 
 ansible-inventory --graph
-ansible-playbook .cicd/ansible/playbooks/build.yml --syntax-check -e country=kr -e deploy_env=stg -e release_tag=syntax-check -e @.cicd/pipeline/kr.yml -e @.cicd/vars/stg.yml -e @.cicd/ansible/vars/kr/stg.yml
+ansible-playbook .cicd/ansible/playbooks/build.yml --syntax-check -e country=kr -e deploy_env=stg -e image_version=syntax-check -e @.cicd/pipeline/kr.yml -e @.cicd/vars/stg.yml -e @.cicd/ansible/vars/kr/stg.yml
 ~~~
 
 실제 수동 배포는 build.yml과 deploy.yml에 같은 세 개의 변수 파일을 주입해 실행합니다. GitHub Actions workflow가 이 호출을 그대로 자동화합니다.

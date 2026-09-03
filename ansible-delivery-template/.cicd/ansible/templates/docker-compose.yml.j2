@@ -11,7 +11,7 @@ services:
       deployment.country: "{{ country }}"
       deployment.environment: "{{ deploy_env }}"
       deployment.target: "{{ target.name }}"
-      deployment.release: "{{ release_tag }}"
+      deployment.image-version: "{{ image_version }}"
     networks:
       - app
 

@@ -55,5 +55,5 @@ jobs:
           export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
           ansible-inventory --graph
           for playbook in build deploy; do
-            ansible-playbook ".cicd/ansible/playbooks/${playbook}.yml" --syntax-check -e "country=${COUNTRY}" -e "deploy_env=${DEPLOY_ENV}" -e "release_tag=syntax-check" -e "@.cicd/pipeline/${COUNTRY}.yml" -e "@.cicd/vars/${DEPLOY_ENV}.yml" -e "@.cicd/ansible/vars/${COUNTRY}/${DEPLOY_ENV}.yml"
+            ansible-playbook ".cicd/ansible/playbooks/${playbook}.yml" --syntax-check -e "country=${COUNTRY}" -e "deploy_env=${DEPLOY_ENV}" -e "image_version=syntax-check" -e "@.cicd/pipeline/${COUNTRY}.yml" -e "@.cicd/vars/${DEPLOY_ENV}.yml" -e "@.cicd/ansible/vars/${COUNTRY}/${DEPLOY_ENV}.yml"
           done
