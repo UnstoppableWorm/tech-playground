@@ -1,0 +1,116 @@
+- name: Validate deployment inputs
+  ansible.builtin.assert:
+    that:
+      - deployment_target_name is defined
+      - harbor_username | length > 0
+      - harbor_password | length > 0
+      - release_image | length > 0
+    fail_msg: Missing target group configuration or Harbor credentials.
+
+- name: Verify Docker is available on the target host
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  changed_when: false
+
+- name: Verify Docker Compose is available on the target host
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - version
+  changed_when: false
+
+- name: Ensure deployment directory exists
+  ansible.builtin.file:
+    path: "{{ deployment_root }}"
+    state: directory
+    mode: "0755"
+
+- name: Merge runtime environment variables
+  ansible.builtin.set_fact:
+    merged_runtime_env: >-
+      {{
+        runtime_env_common
+        | combine(runtime_env_region)
+        | combine(runtime_env_stage)
+        | combine(runtime_env_target)
+      }}
+
+- name: Render Compose manifest
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/docker-compose.yml.j2"
+    dest: "{{ compose_file_path }}"
+    mode: "0644"
+
+- name: Render runtime environment file
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/app.env.j2"
+    dest: "{{ runtime_env_file_path }}"
+    mode: "0644"
+
+- name: Login to Harbor from the target host
+  ansible.builtin.command:
+    argv:
+      - docker
+      - login
+      - "{{ harbor_registry_host }}"
+      - --username
+      - "{{ harbor_username }}"
+      - --password-stdin
+    stdin: "{{ harbor_password }}"
+  no_log: true
+  changed_when: true
+
+- name: Pull release image on the target host
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ compose_file_path }}"
+      - --env-file
+      - "{{ runtime_env_file_path }}"
+      - pull
+  args:
+    chdir: "{{ deployment_root }}"
+  changed_when: true
+
+- name: Start or update the service
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ compose_file_path }}"
+      - --env-file
+      - "{{ runtime_env_file_path }}"
+      - up
+      - --detach
+      - --remove-orphans
+  args:
+    chdir: "{{ deployment_root }}"
+  changed_when: true
+
+- name: Wait for the health endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ host_port }}{{ healthcheck_path }}"
+    method: GET
+    status_code: 200
+  register: deployment_healthcheck
+  retries: 12
+  delay: 5
+  until: deployment_healthcheck.status == 200
+
+- name: Prune stale images on production hosts
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - prune
+      - --force
+      - --filter
+      - until=168h
+  when: docker_image_prune_on_deploy | bool
+  changed_when: true

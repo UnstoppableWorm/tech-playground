@@ -1,0 +1,10 @@
+stage_code: production
+deploy_serial: 1
+host_port: 8080
+container_restart_policy: always
+docker_image_prune_on_deploy: true
+
+runtime_env_stage:
+  APP_RUNTIME_MODE: production
+  LOG_LEVEL: INFO
+

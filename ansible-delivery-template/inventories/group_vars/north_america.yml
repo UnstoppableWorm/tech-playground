@@ -1,0 +1,10 @@
+region_code: na
+container_timezone: America/Toronto
+harbor_project: apps-na
+
+runtime_env_region:
+  TZ: "{{ container_timezone }}"
+  APP_REGION_NAME: north-america
+  DEFAULT_LOCALE: en-US
+  CDN_BASE_URL: https://cdn-na.example.com
+

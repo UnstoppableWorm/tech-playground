@@ -1,0 +1,7 @@
+deployment_target_name: europe_validation
+app_domain: validation-eu.example.com
+
+runtime_env_target:
+  APP_BASE_URL: https://validation-eu.example.com
+  SPRING_PROFILES_ACTIVE: eu,validation
+

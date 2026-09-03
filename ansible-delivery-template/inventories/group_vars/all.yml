@@ -1,0 +1,31 @@
+app_name: delivery-template-app
+app_source_dir: "{{ playbook_dir }}/.."
+app_dockerfile_path: "{{ app_source_dir }}/Dockerfile"
+
+harbor_registry_host: harbor.example.com
+harbor_project: demo
+app_image_name: "{{ harbor_registry_host }}/{{ harbor_project }}/{{ app_name }}"
+release_tag: latest
+release_image: "{{ app_image_name }}:{{ release_tag }}"
+
+deploy_base_dir: "/opt/{{ app_name }}"
+deployment_root: "{{ deploy_base_dir }}/{{ deployment_target_name }}"
+compose_file_path: "{{ deployment_root }}/compose.yaml"
+runtime_env_file_path: "{{ deployment_root }}/app.env"
+
+container_name: "{{ app_name }}-{{ deployment_target_name | replace('_', '-') }}"
+container_port: 80
+host_port: 8080
+container_restart_policy: unless-stopped
+healthcheck_path: /
+docker_image_prune_on_deploy: false
+
+runtime_env_common:
+  APP_NAME: "{{ app_name }}"
+  APP_STAGE: "{{ stage_code }}"
+  APP_REGION: "{{ region_code }}"
+  RELEASE_IMAGE: "{{ release_image }}"
+runtime_env_region: {}
+runtime_env_stage: {}
+runtime_env_target: {}
+

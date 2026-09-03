@@ -1,0 +1,10 @@
+region_code: kr
+container_timezone: Asia/Seoul
+harbor_project: apps-kr
+
+runtime_env_region:
+  TZ: "{{ container_timezone }}"
+  APP_REGION_NAME: domestic
+  DEFAULT_LOCALE: ko-KR
+  CDN_BASE_URL: https://cdn-kr.example.com
+
