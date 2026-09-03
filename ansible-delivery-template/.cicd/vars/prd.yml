@@ -1,0 +1,10 @@
+build_runner: ubuntu-latest
+deploy_runner: ubuntu-latest
+
+deployment_environment:
+  code: prd
+  deploy_serial: 1
+  docker_image_prune: true
+  runtime_env:
+    APP_RUNTIME_MODE: production
+    LOG_LEVEL: INFO

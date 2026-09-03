@@ -1,7 +1,0 @@
-deployment_target_name: north_america_validation
-app_domain: validation-na.example.com
-
-runtime_env_target:
-  APP_BASE_URL: https://validation-na.example.com
-  SPRING_PROFILES_ACTIVE: na,validation
-

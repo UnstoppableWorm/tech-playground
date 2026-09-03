@@ -1,0 +1,20 @@
+target:
+  group: kr_stg
+  name: kr-stg
+  deployment_root: /opt/delivery-template/kr-stg
+  host_port: 18080
+  container_port: 80
+  restart_policy: unless-stopped
+  healthcheck_path: /
+
+release:
+  app_name: delivery-template-app
+  image_name: delivery-template-app
+  harbor:
+    registry: registry-kr.internal.example.com
+    project: applications
+  runtime_env:
+    TZ: Asia/Seoul
+    APP_REGION: kr
+    APP_BASE_URL: https://stg-kr.example.com
+    SPRING_PROFILES_ACTIVE: kr,stg

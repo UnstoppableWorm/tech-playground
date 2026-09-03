@@ -1,0 +1,20 @@
+services:
+  app:
+    image: "{{ release_image }}"
+    container_name: "{{ release.app_name }}-{{ target.name }}"
+    restart: "{{ target.restart_policy }}"
+    env_file:
+      - "{{ runtime_env_file_path }}"
+    ports:
+      - "{{ target.host_port }}:{{ target.container_port }}"
+    labels:
+      deployment.country: "{{ country }}"
+      deployment.environment: "{{ deploy_env }}"
+      deployment.target: "{{ target.name }}"
+      deployment.release: "{{ release_tag }}"
+    networks:
+      - app
+
+networks:
+  app:
+    name: "{{ release.app_name }}-{{ target.name }}-network"

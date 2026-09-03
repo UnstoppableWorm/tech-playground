@@ -1,0 +1,20 @@
+target:
+  group: eu_prd
+  name: eu-prd
+  deployment_root: /opt/delivery-template/eu-prd
+  host_port: 8080
+  container_port: 80
+  restart_policy: always
+  healthcheck_path: /
+
+release:
+  app_name: delivery-template-app
+  image_name: delivery-template-app
+  harbor:
+    registry: registry-eu.internal.example.com
+    project: applications
+  runtime_env:
+    TZ: Europe/Berlin
+    APP_REGION: eu
+    APP_BASE_URL: https://eu.example.com
+    SPRING_PROFILES_ACTIVE: eu,prd

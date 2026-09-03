@@ -1,8 +1,0 @@
-stage_code: validation
-deploy_serial: "100%"
-host_port: 18080
-
-runtime_env_stage:
-  APP_RUNTIME_MODE: verification
-  LOG_LEVEL: DEBUG
-

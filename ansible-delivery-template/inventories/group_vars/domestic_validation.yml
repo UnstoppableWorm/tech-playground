@@ -1,7 +1,0 @@
-deployment_target_name: domestic_validation
-app_domain: validation-kr.example.com
-
-runtime_env_target:
-  APP_BASE_URL: https://validation-kr.example.com
-  SPRING_PROFILES_ACTIVE: kr,validation
-

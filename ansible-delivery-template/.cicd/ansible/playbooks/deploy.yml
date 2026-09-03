@@ -1,0 +1,10 @@
+---
+- name: Deploy a country-specific release to the selected VM group
+  hosts: "{{ target.group | default('target_group_required') }}"
+  gather_facts: false
+  serial: "{{ deployment_environment.deploy_serial | default('100%') }}"
+  roles:
+    - role: deploy_container
+      vars:
+        harbor_username: "{{ lookup('ansible.builtin.env', 'HARBOR_USERNAME') }}"
+        harbor_password: "{{ lookup('ansible.builtin.env', 'HARBOR_PASSWORD') }}"

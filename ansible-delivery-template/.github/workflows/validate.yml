@@ -1,21 +1,38 @@
-name: validate-template
+name: validate-cicd-template
 
 on:
   pull_request:
     paths:
-      - ansible-delivery-template/**
+      - .cicd/**
+      - .github/workflows/**
+      - Dockerfile
+      - static/**
   push:
     branches:
       - main
     paths:
-      - ansible-delivery-template/**
+      - .cicd/**
+      - .github/workflows/**
+      - Dockerfile
+      - static/**
 
 permissions:
   contents: read
 
 jobs:
-  validate:
+  syntax:
+    name: Validate ${{ matrix.country }}-${{ matrix.deploy_env }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        country:
+          - kr
+          - eu
+          - na
+        deploy_env:
+          - stg
+          - prd
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,18 +41,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
 
       - name: Install Ansible
-        working-directory: ansible-delivery-template
         run: |
           python -m pip install --upgrade pip
-          pip install ansible-core==2.17.7
+          python -m pip install ansible-core==2.17.7
 
-      - name: Inventory graph
-        working-directory: ansible-delivery-template
-        run: ansible-inventory --graph
-
-      - name: Syntax check
-        working-directory: ansible-delivery-template
-        run: ansible-playbook playbooks/release.yml --syntax-check -e target_group=north_america_validation
+      - name: Validate inventory and playbook syntax
+        env:
+          COUNTRY: ${{ matrix.country }}
+          DEPLOY_ENV: ${{ matrix.deploy_env }}
+        run: |
+          export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
+          ansible-inventory --graph
+          for playbook in build deploy; do
+            ansible-playbook ".cicd/ansible/playbooks/${playbook}.yml" --syntax-check -e "country=${COUNTRY}" -e "deploy_env=${DEPLOY_ENV}" -e "release_tag=syntax-check" -e "@.cicd/pipeline/${COUNTRY}.yml" -e "@.cicd/vars/${DEPLOY_ENV}.yml" -e "@.cicd/ansible/vars/${COUNTRY}/${DEPLOY_ENV}.yml"
+          done

@@ -1,7 +1,0 @@
-deployment_target_name: north_america_production
-app_domain: api-na.example.com
-
-runtime_env_target:
-  APP_BASE_URL: https://api-na.example.com
-  SPRING_PROFILES_ACTIVE: na,production
-

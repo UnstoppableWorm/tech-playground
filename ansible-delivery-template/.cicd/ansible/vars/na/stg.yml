@@ -1,0 +1,20 @@
+target:
+  group: na_stg
+  name: na-stg
+  deployment_root: /opt/delivery-template/na-stg
+  host_port: 18080
+  container_port: 80
+  restart_policy: unless-stopped
+  healthcheck_path: /
+
+release:
+  app_name: delivery-template-app
+  image_name: delivery-template-app
+  harbor:
+    registry: registry-na.internal.example.com
+    project: applications
+  runtime_env:
+    TZ: America/Toronto
+    APP_REGION: na
+    APP_BASE_URL: https://stg-na.example.com
+    SPRING_PROFILES_ACTIVE: na,stg

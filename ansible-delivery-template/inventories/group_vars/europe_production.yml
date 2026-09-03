@@ -1,7 +1,0 @@
-deployment_target_name: europe_production
-app_domain: api-eu.example.com
-
-runtime_env_target:
-  APP_BASE_URL: https://api-eu.example.com
-  SPRING_PROFILES_ACTIVE: eu,production
-

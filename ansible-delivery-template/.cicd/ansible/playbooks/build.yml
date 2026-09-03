@@ -1,0 +1,10 @@
+---
+- name: Build and push a country-specific release image
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: build_image
+      vars:
+        harbor_username: "{{ lookup('ansible.builtin.env', 'HARBOR_USERNAME') }}"
+        harbor_password: "{{ lookup('ansible.builtin.env', 'HARBOR_PASSWORD') }}"

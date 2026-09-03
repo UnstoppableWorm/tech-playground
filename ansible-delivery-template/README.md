@@ -1,106 +1,99 @@
-# Ansible Delivery Template
+# VM Migration Ansible CI/CD Template
 
-GitHub Actions에서 트리거하고, 실제 릴리스 흐름은 Ansible 플레이북으로 통일하는 배포 템플릿입니다.
+신규 클라우드 환경으로 VM을 이관할 때, GitLab CI 안에 섞여 있던 권역별·환경별 설정과 반복된 배포 스테이지를 분리한 구조를 GitHub Actions용으로 옮긴 템플릿입니다.
 
-현재 워크스페이스에서는 하위 디렉터리로 만들었고, 이 디렉터리를 별도 GitHub 저장소로 분리하면 `.github/workflows` 경로가 그대로 저장소 루트 기준 구조가 됩니다.
+GitHub Actions는 수동 실행, 시크릿 주입, runner 선택만 담당합니다. 실제 Harbor 로그인, 이미지 빌드와 push, VM 접속, 이미지 pull, Compose 배포 흐름은 Ansible 플레이북으로 고정해 여러 애플리케이션이 같은 절차를 재사용할 수 있게 합니다.
 
-핵심 목표는 아래와 같습니다.
-
-- `북미 / 유럽 / 내수`와 `검증 / 운영`을 분리해서 변수 중복을 줄입니다.
-- `Harbor 로그인 -> 이미지 빌드 -> 푸시 -> 서버 접속 -> pull/up 배포`를 쉘 스크립트가 아니라 Ansible 태스크로 관리합니다.
-- GitHub Actions는 입력과 시크릿 주입만 담당하고, 배포 로직은 플레이북 하나로 유지합니다.
+이 디렉터리는 현재 워크스페이스에서는 하위 프로젝트입니다. 별도 저장소로 분리하면 아래 구조가 저장소 루트 기준으로 그대로 동작합니다.
 
 ## 구조
 
-```text
-ansible-delivery-template/
+~~~text
+.
+├── .cicd/
+│   ├── pipeline/                         # 권역별 빌드/배포 구성
+│   │   ├── kr.yml
+│   │   ├── eu.yml
+│   │   └── na.yml
+│   ├── ansible/
+│   │   ├── inventories/hosts.yml
+│   │   ├── playbooks/                    # 모든 환경에서 재사용
+│   │   │   ├── build.yml
+│   │   │   └── deploy.yml
+│   │   ├── roles/
+│   │   │   ├── build_image/
+│   │   │   └── deploy_container/
+│   │   ├── templates/
+│   │   └── vars/                         # 국가 + 환경별 값
+│   │       ├── kr/{stg,prd}.yml
+│   │       ├── eu/{stg,prd}.yml
+│   │       └── na/{stg,prd}.yml
+│   └── vars/                             # runner, 배포 정책 메타데이터
+│       ├── stg.yml
+│       └── prd.yml
 ├── .github/workflows/
-│   ├── deploy.yml
+│   ├── cicd.yml
 │   └── validate.yml
-├── inventories/
-│   ├── hosts.yml
-│   └── group_vars/
-│       ├── all.yml
-│       ├── north_america.yml
-│       ├── europe.yml
-│       ├── domestic.yml
-│       ├── validation.yml
-│       ├── production.yml
-│       └── {region}_{stage}.yml
-├── playbooks/release.yml
-├── roles/
-│   ├── release_image/
-│   └── deploy_app/
-├── templates/
-│   ├── docker-compose.yml.j2
-│   └── app.env.j2
 ├── Dockerfile
 └── static/index.html
-```
+~~~
 
-## 변수 분리 방식
+## 분리 기준
 
-호스트는 `north_america_validation`, `europe_production` 같은 조합 그룹에 속합니다.
+| 위치 | 책임 |
+| --- | --- |
+| .cicd/pipeline/{kr,eu,na}.yml | 권역별 파이프라인 이름과 해당 권역의 변수 루트 |
+| .cicd/vars/{stg,prd}.yml | GitHub runner, 순차 배포 수, 이미지 정리, 환경 공통 런타임 값 |
+| .cicd/ansible/vars/{country}/{env}.yml | Harbor 주소, 대상 VM 그룹, 포트, 도메인, 국가별 런타임 환경변수 |
+| .cicd/ansible/playbooks/*.yml | 빌드와 배포의 공통 절차 |
 
-- `group_vars/north_america.yml`: 지역 공통값
-- `group_vars/validation.yml`: 스테이지 공통값
-- `group_vars/north_america_validation.yml`: 조합별 override
+권역이나 검증/운영 환경을 추가할 때는 공통 플레이북을 복사하지 않습니다. 파이프라인 파일과 변수 파일만 추가 또는 수정합니다.
 
-즉, 한 타깃을 배포할 때 지역값 + 스테이지값 + 타깃 override가 합쳐집니다.
+## GitHub Actions 흐름
 
-## 배포 흐름
+workflow_dispatch에서 country, deploy_env, release_mode, release_tag을 선택하면 다음 파일이 함께 주입됩니다.
 
-`playbooks/release.yml`은 두 단계로 움직입니다.
+~~~text
+kr + stg
+  -> .cicd/pipeline/kr.yml
+  -> .cicd/vars/stg.yml
+  -> .cicd/ansible/vars/kr/stg.yml
+  -> build.yml
+  -> deploy.yml
+~~~
 
-1. GitHub Actions 러너에서 Harbor 로그인 후 `docker build` / `docker push`
-2. 대상 서버에서 Harbor 로그인 후 `docker compose pull` / `docker compose up -d`
+GitLab의 build_kr, deploy_kr 같은 국가별 job은 GitHub Actions의 입력값과 .cicd/pipeline/kr.yml로 대체했습니다. 환경별 runner 메타데이터는 .cicd/vars/{stg,prd}.yml에서 읽어 build/deploy job의 runs-on으로 사용합니다.
 
-운영 환경은 기본적으로 `serial: 1`로 굴리게 해 두었고, 검증 환경은 전체 호스트를 한 번에 배포하게 설정했습니다.
+## Docker 호환성
 
-## GitHub 설정
+빌드에는 CI runner에 설치된 Docker CLI를 사용하며 특정 docker:A, docker:B 이미지에 묶지 않습니다. 배포 플레이북은 대상 VM에서 docker compose를 먼저 확인하고, 없으면 legacy docker-compose를 자동 선택합니다. 따라서 VM의 Compose 세대가 달라도 같은 플레이북을 재사용할 수 있습니다.
 
-GitHub Environments를 아래 이름으로 만드는 것을 전제로 잡았습니다.
+## GitHub 환경과 시크릿
 
-- `north_america_validation`
-- `north_america_production`
-- `europe_validation`
-- `europe_production`
-- `domestic_validation`
-- `domestic_production`
+GitHub Environments를 아래처럼 권역과 환경 조합으로 생성합니다.
 
-각 Environment에는 최소 아래 시크릿이 필요합니다.
+- kr-stg, kr-prd
+- eu-stg, eu-prd
+- na-stg, na-prd
 
-- `HARBOR_USERNAME`
-- `HARBOR_PASSWORD`
-- `SSH_PRIVATE_KEY`
-- `SSH_KNOWN_HOSTS`
+각 Environment에 아래 시크릿을 설정합니다.
 
-## 실제 프로젝트에 붙일 때 바꿀 부분
+- HARBOR_USERNAME
+- HARBOR_PASSWORD
+- SSH_PRIVATE_KEY
+- SSH_KNOWN_HOSTS
 
-- `inventories/hosts.yml`의 실제 서버 주소
-- `inventories/group_vars/*.yml`의 도메인, Harbor project, 런타임 env
-- 루트 `Dockerfile`과 애플리케이션 소스
-- 필요하면 `templates/docker-compose.yml.j2`의 볼륨, 헬스체크, 추가 서비스
-
-샘플 `Dockerfile`과 `static/index.html`은 플레이북이 곧바로 빌드 가능한 최소 예시입니다. 실제 서비스 레포로 옮길 때는 이 둘을 서비스 코드로 교체하면 됩니다.
+SSH_KNOWN_HOSTS는 대상 VM의 host key를 포함해야 합니다. 실제 이관 환경에서는 .cicd/ansible/inventories/hosts.yml의 예시 호스트와 각 변수 파일의 Harbor, 도메인, 배포 경로를 실값으로 바꿉니다.
 
 ## 로컬 검증
 
-```bash
+~~~bash
 cd ansible-delivery-template
 python -m pip install ansible-core==2.17.7
+export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
+
 ansible-inventory --graph
-ansible-playbook playbooks/release.yml --syntax-check -e target_group=north_america_validation
-```
+ansible-playbook .cicd/ansible/playbooks/build.yml --syntax-check -e country=kr -e deploy_env=stg -e release_tag=syntax-check -e @.cicd/pipeline/kr.yml -e @.cicd/vars/stg.yml -e @.cicd/ansible/vars/kr/stg.yml
+~~~
 
-수동 배포 테스트 예시는 아래처럼 돌릴 수 있습니다.
-
-```bash
-cd ansible-delivery-template
-export HARBOR_USERNAME=...
-export HARBOR_PASSWORD=...
-ansible-playbook playbooks/release.yml \
-  -e target_group=north_america_validation \
-  -e release_tag=manual-test-001 \
-  -e deploy_only=true
-```
+실제 수동 배포는 build.yml과 deploy.yml에 같은 세 개의 변수 파일을 주입해 실행합니다. GitHub Actions workflow가 이 호출을 그대로 자동화합니다.

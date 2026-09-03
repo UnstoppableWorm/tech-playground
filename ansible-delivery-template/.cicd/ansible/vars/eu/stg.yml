@@ -1,0 +1,20 @@
+target:
+  group: eu_stg
+  name: eu-stg
+  deployment_root: /opt/delivery-template/eu-stg
+  host_port: 18080
+  container_port: 80
+  restart_policy: unless-stopped
+  healthcheck_path: /
+
+release:
+  app_name: delivery-template-app
+  image_name: delivery-template-app
+  harbor:
+    registry: registry-eu.internal.example.com
+    project: applications
+  runtime_env:
+    TZ: Europe/Berlin
+    APP_REGION: eu
+    APP_BASE_URL: https://stg-eu.example.com
+    SPRING_PROFILES_ACTIVE: eu,stg

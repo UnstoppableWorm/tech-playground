@@ -1,0 +1,10 @@
+build_runner: ubuntu-latest
+deploy_runner: ubuntu-latest
+
+deployment_environment:
+  code: stg
+  deploy_serial: "100%"
+  docker_image_prune: false
+  runtime_env:
+    APP_RUNTIME_MODE: verification
+    LOG_LEVEL: DEBUG
