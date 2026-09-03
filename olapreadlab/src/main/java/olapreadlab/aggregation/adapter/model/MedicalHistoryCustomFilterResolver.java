@@ -3,8 +3,8 @@ package olapreadlab.aggregation.adapter.model;
 import java.util.List;
 
 import olapreadlab.aggregation.application.port.CustomFilterResolver;
-import olapreadlab.aggregation.model.AggregateViewDefinition;
-import olapreadlab.aggregation.model.AggregationModelDefinition;
+import olapreadlab.aggregation.model.ViewDefinition;
+import olapreadlab.aggregation.model.ModelDefinition;
 import olapreadlab.aggregation.model.filter.ComparisonOperator;
 import olapreadlab.aggregation.model.filter.FilterExpression;
 import olapreadlab.aggregation.model.filter.LogicalOperator;
@@ -25,8 +25,8 @@ class MedicalHistoryCustomFilterResolver implements CustomFilterResolver {
 	@Override
 	public FilterExpression resolve(
 			FilterExpression.Custom filter,
-			AggregationModelDefinition model,
-			AggregateViewDefinition view) {
+			ModelDefinition model,
+			ViewDefinition view) {
 		return new FilterExpression.Junction(LogicalOperator.AND, List.of(
 				new FilterExpression.Comparison(
 						"organCode", ComparisonOperator.EQ, one(filter, "organCode")),

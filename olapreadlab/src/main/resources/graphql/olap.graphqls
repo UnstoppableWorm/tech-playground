@@ -1,0 +1,73 @@
+type Query {
+    olap(input: OlapQueryInput!): OlapResult!
+}
+
+input OlapQueryInput {
+    model: String!
+    view: String!
+    mode: QueryMode!
+    fromInclusive: String!
+    toExclusive: String!
+    where: OlapPredicateInput
+    having: OlapPredicateInput
+}
+
+input OlapPredicateInput {
+    operator: OlapPredicateOperator!
+    field: String
+    value: String
+    values: [String!]
+    lower: String
+    upper: String
+    children: [OlapPredicateInput!]
+    name: String
+    arguments: [OlapFilterArgumentInput!]
+}
+
+input OlapFilterArgumentInput {
+    name: String!
+    values: [String!]!
+}
+
+enum OlapPredicateOperator {
+    AND
+    OR
+    EQ
+    NE
+    GT
+    GTE
+    LT
+    LTE
+    IN
+    BETWEEN
+    LIKE
+    PREFIX
+    IS_NULL
+    IS_NOT_NULL
+    CUSTOM
+}
+
+enum QueryMode {
+    POSTGRES_RAW
+    POSTGRES_BATCH_HYBRID
+    CLICKHOUSE_HYBRID
+}
+
+type OlapResult {
+    model: String!
+    view: String!
+    mode: QueryMode!
+    coveredUntil: String
+    rows: [OlapRow!]!
+}
+
+type OlapRow {
+    bucket: String!
+    dimensions: [OlapValue!]!
+    measures: [OlapValue!]!
+}
+
+type OlapValue {
+    name: String!
+    value: String!
+}

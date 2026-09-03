@@ -13,7 +13,7 @@ OLAP 조회 상황에서 여러 읽기 전략을 동일한 데이터와 쿼리 �
 | 실험군 | 데이터 경로 | 조회 시 수행 작업 |
 | --- | --- | --- |
 | PostgreSQL raw | PostgreSQL raw → 애플리케이션 | 1억 행을 읽고 애플리케이션에서 집계 |
-| PostgreSQL aggregate | PostgreSQL raw → 집계 테이블 | 사전 계산된 집계 테이블을 조회 및 최종 집계 |
+| PostgreSQL rollup | PostgreSQL raw → 집계 테이블 | 사전 계산된 집계 테이블을 조회 및 최종 집계 |
 | ClickHouse MV | PostgreSQL → Debezium → Kafka → ClickHouse → Materialized View | Materialized View 결과 조회 |
 
 세 경로는 `olapreadlab.experiment.ReadPath`로 식별한다.
@@ -28,10 +28,10 @@ Content-Type: application/json
 ```
 
 ```graphql
-query Aggregate($input: AggregationQueryInput!) {
-  aggregate(input: $input) {
+query Olap($input: OlapQueryInput!) {
+  olap(input: $input) {
     mode
-    aggregateCoveredUntil
+    coveredUntil
     rows {
       bucket
       dimensions { name value }
@@ -69,9 +69,9 @@ variables:
 }
 ```
 
-`model`은 비즈니스 데이터 모델, `view`는 허용된 집계 형태를 선택한다. `where`는 `AND`/`OR` 중첩과 `EQ`, `NE`, `GT`, `GTE`, `LT`, `LTE`, `IN`, `BETWEEN`, `LIKE`, `PREFIX`, `IS_NULL`, `IS_NOT_NULL`을 지원한다. 값은 등록된 `ScalarType`으로 변환된다. 기존 `filters` 입력도 호환되며 각 항목을 `AND`로 연결한 `IN` 조건으로 해석한다.
+`model`은 비즈니스 데이터 모델, `view`는 허용된 집계 형태를 선택한다. `where`는 `AND`/`OR` 중첩과 `EQ`, `NE`, `GT`, `GTE`, `LT`, `LTE`, `IN`, `BETWEEN`, `LIKE`, `PREFIX`, `IS_NULL`, `IS_NOT_NULL`을 지원한다. 값은 등록된 `ScalarType`으로 변환된다.
 
-`having`은 같은 조건 트리를 사용하지만 measure만 참조할 수 있다. 하이브리드 경로에서는 조각별 SQL에 먼저 적용하지 않고 aggregate/raw 결과를 합친 뒤 적용해 의미가 달라지는 것을 방지한다. 결과 행 수 수준에서 평가하므로 1억 raw 행 전체에 대한 애플리케이션 필터는 아니다.
+`having`은 같은 조건 트리를 사용하지만 measure만 참조할 수 있다. 하이브리드 경로에서는 조각별 SQL에 먼저 적용하지 않고 rollup/raw 결과를 합친 뒤 적용해 의미가 달라지는 것을 방지한다. 결과 행 수 수준에서 평가하므로 1억 raw 행 전체에 대한 애플리케이션 필터는 아니다.
 
 `CUSTOM`은 도메인별 검색조건 이름과 인자를 받고 `CustomFilterResolver` 구현체가 공통 조건 트리로 확장한다. 의료 모델에는 `{ operator: CUSTOM, name: "organDiseasePair", arguments: [{ name: "organCode", values: ["10"] }, { name: "diseaseCode", values: ["101"] }] }` 예시가 등록돼 있다. 커스텀 구현도 SQL이나 물리 컬럼명을 반환하지 않으므로 저장소별 compiler와 바인딩 검증을 우회하지 못한다.
 
@@ -110,9 +110,9 @@ ClickHouse 경로는 `pipeline='CLICKHOUSE'`를 사용하며, 단순 Kafka consu
 
 ## 범용 집계 모델과 헥사고날 경계
 
-공통 애플리케이션 코어는 사람·장기·질병 또는 실제 테이블명을 알지 못한다. 코어가 담당하는 일은 모델 조회, 입력 검증, 체크포인트를 기준으로 한 aggregate/raw 범위 분할, 결과 병합뿐이다.
+공통 애플리케이션 코어는 사람·장기·질병 또는 실제 테이블명을 알지 못한다. 코어가 담당하는 일은 모델 조회, 입력 검증, 체크포인트를 기준으로 한 rollup/raw 범위 분할, 결과 병합뿐이다.
 
-각 비즈니스의 `AggregationModelProvider` 구현체는 저장소와 무관한 논리 정의만 등록한다.
+각 비즈니스는 `ModelDefinition` 빈으로 저장소와 무관한 논리 정의만 등록한다.
 
 - 논리적인 model/view 이름
 - 차원의 API 이름과 값 타입
@@ -120,51 +120,52 @@ ClickHouse 경로는 `pipeline='CLICKHOUSE'`를 사용하며, 단순 Kafka consu
 - view가 보존하는 차원과 허용 검색 조건
 - 시간 bucket
 
-별도의 `AggregationStorageBindingProvider`가 JDBC 인프라 매핑을 등록한다.
+별도의 `ModelStorageBindingProvider`가 JDBC 인프라 매핑을 등록한다.
 
 - PostgreSQL raw 테이블, event-time 컬럼과 차원/measure 컬럼
 - view별 PostgreSQL 집계 테이블과 컬럼
 - view별 ClickHouse 집계 테이블과 컬럼
 
-`AggregateViewStorageBinding`은 `postgres`, `clickHouse` 같은 고정 필드를 갖지 않고 `StorageBindingKey → AggregateTableBinding` 맵만 가진다. 실제 키는 JDBC 인프라가 소유하므로 다른 warehouse를 추가해도 binding 타입을 수정하지 않는다.
+`RollupViewBinding`은 `postgres`, `clickHouse` 같은 고정 필드를 갖지 않고 `StorageBindingKey → RollupTableBinding` 맵만 가진다. 실제 키는 JDBC 인프라가 소유하므로 다른 warehouse를 추가해도 binding 타입을 수정하지 않는다.
 
-`AggregationModelDefinition`, `AggregateViewDefinition`, `DimensionDefinition`, `MeasureDefinition`에는 SQL 식별자나 PostgreSQL/ClickHouse 정보가 없다. JDBC outbound adapter만 `AggregationStorageBindingCatalog`를 통해 물리 매핑을 조회한다. 모든 SQL 식별자는 binding 등록 시 검증되며 요청값을 테이블명이나 컬럼명으로 사용하지 않는다.
+`ModelDefinition`, `ViewDefinition`, `DimensionDefinition`, `MeasureDefinition`에는 SQL 식별자나 PostgreSQL/ClickHouse 정보가 없다. JDBC outbound adapter만 `StorageBindingRegistry`를 통해 물리 매핑을 조회한다. 모든 SQL 식별자는 binding 등록 시 검증되며 요청값을 테이블명이나 컬럼명으로 사용하지 않는다.
 
 SQL 문자열 생성도 실행 어댑터와 분리되어 있다.
 
-- `PostgresRawQueryCompiler`: PostgreSQL raw SELECT와 중첩 predicate SQL 생성
-- `PostgresAggregateQueryCompiler`: PostgreSQL 집계 SELECT/GROUP BY 생성
-- `ClickHouseAggregateQueryCompiler`: ClickHouse 집계 SELECT/GROUP BY 생성
-- `RawQueryCompilerRegistry` / `AggregateQueryCompilerRegistry`: storage key, `supports(model/view)`, priority로 compiler 선택
+- `PostgresQueryCompiler`: PostgreSQL raw SELECT와 PostgreSQL 집계 SELECT/GROUP BY 생성
+- `ClickHouseRollupQueryCompiler`: ClickHouse 집계 SELECT/GROUP BY 생성
+- `QueryCompilerRegistry`: storage key, query, table binding 타입(raw/rollup), priority로 compiler 선택
 - `CompiledQuery`: SQL, 바인딩 파라미터, 결과 projection을 함께 전달
-- `JdbcAggregationQueryExecutor`: compiled query 실행과 projection 기반 결과 매핑만 담당
+- `JdbcQueryExecutor`: compiled query 실행과 projection 기반 결과 매핑만 담당
 
-논리 조건은 저장소 독립적인 `FilterExpression` AST다. WHERE 조건은 각 compiler가 물리 컬럼 binding과 named parameter로 변환한다. 도메인 확장은 `CustomFilterResolver`에서 표준 AST로 낮춘 뒤 같은 검증과 compiler를 통과한다. HAVING은 `AggregationHavingEvaluator`가 최종 병합 결과에 적용한다.
+논리 조건은 저장소 독립적인 `FilterExpression` AST다. `PredicateResolver`가 먼저 `CustomFilterResolver` 확장, 허용 필드 검사, 타입 변환을 수행한다. 이후 WHERE 조건은 각 compiler가 물리 컬럼 binding과 named parameter로 변환하고, HAVING은 `HavingEvaluator`가 최종 병합 결과에 적용한다.
 
 기본 compiler는 선언형 model/storage binding으로 SQL을 생성한다. 저장소 전용 함수나 특수 view가 필요하면 논리 모델에 SQL 문자열을 넣지 않고 해당 저장소의 compiler 구현을 추가한다. 전용 compiler는 `supports`로 model/view를 제한하고 기본값보다 높은 `priority`를 선언하면 registry가 우선 선택한다.
 
-현재 의료 예시는 논리 정의인 `MedicalHistoryAggregationModelProvider`와 물리 매핑인 `MedicalHistoryStorageBindingProvider`로 분리돼 있다. 새 비즈니스를 추가할 때 이 두 provider와 실제 테이블/MV를 추가하며 공통 서비스나 컨트롤러는 수정하지 않는다.
+현재 의료 예시는 논리 정의 빈을 등록하는 `MedicalHistoryModelConfiguration`과 물리 매핑인 `MedicalHistoryStorageBindingProvider`로 분리돼 있다. 새 비즈니스를 추가할 때 이 정의 빈과 실제 테이블/MV 바인딩을 추가하며 공통 서비스나 컨트롤러는 수정하지 않는다.
 
 ```text
 HTTP request
-    -> AggregationQueryService (공통 유스케이스)
-        -> AggregationModelCatalog (논리 모델만 조회)
-        1. AggregationReadPlanner
-           -> Checkpoint port로 aggregate/raw 조회 경계 결정
-        2. PostgresRawAggregationQueryAdapter
-           -> AggregationStorageBindingCatalog에서 PG raw 매핑 조회
-           -> PostgresRawQueryCompiler로 SQL compile
+    -> QueryService (공통 유스케이스)
+        -> QueryResolver (model/view + where/having 해석)
+           -> ModelRegistry (논리 모델만 조회)
+           -> PredicateResolver (조건 검증, custom 확장, 타입 변환)
+        1. ReadPlanner
+           -> Checkpoint port로 rollup/raw 조회 경계 결정
+        2. PostgresRawQueryAdapter
+           -> StorageBindingRegistry에서 PG raw 매핑 조회
+           -> PostgresQueryCompiler로 SQL compile
            -> 경계 이후 PostgreSQL raw 조회 및 집계
-        3. AggregateStoreQueryPortRegistry
-           -> POSTGRES_BATCH_HYBRID: PostgresAggregateQueryAdapter
-           -> CLICKHOUSE_HYBRID: ClickHouseAggregateQueryAdapter
+        3. RollupQueryPortRegistry
+           -> POSTGRES_BATCH_HYBRID: PostgresRollupQueryAdapter
+           -> CLICKHOUSE_HYBRID: ClickHouseRollupQueryAdapter
            -> 각 어댑터가 자신의 storage binding 조회
-           -> 저장소별 AggregateQueryCompiler로 SQL compile
-           -> JdbcAggregationQueryExecutor로 실행
+           -> PostgreSQL은 PostgresQueryCompiler, ClickHouse는 ClickHouseRollupQueryCompiler로 SQL compile
+           -> JdbcQueryExecutor로 실행
         4. 두 결과 병합 및 반환
 ```
 
-`PostgresAggregationCheckpointAdapter`는 완료 경계를 저장한 PostgreSQL 제어 테이블만 읽으며 집계 데이터를 조회하지 않는다. 세 데이터 조회 어댑터는 물리 저장소와 역할별로 분리되어 있다.
+`PostgresCoverageCheckpointAdapter`는 완료 경계를 저장한 PostgreSQL 제어 테이블만 읽으며 집계 데이터를 조회하지 않는다. 세 데이터 조회 어댑터는 물리 저장소와 역할별로 분리되어 있다.
 
 ## 집계 계층과 전략
 

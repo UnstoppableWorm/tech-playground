@@ -4,7 +4,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import olapreadlab.aggregation.adapter.jdbc.mapping.SqlIdentifier;
-import olapreadlab.aggregation.application.ResolvedAggregationQuery;
+import olapreadlab.aggregation.application.ResolvedQuery;
 import olapreadlab.aggregation.model.filter.FilterExpression;
 
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -17,7 +17,7 @@ final class QueryCompilerSupport {
 	static void appendFilters(
 			StringBuilder sql,
 			MapSqlParameterSource parameters,
-			ResolvedAggregationQuery resolved,
+			ResolvedQuery resolved,
 			Map<String, SqlIdentifier> dimensionColumns) {
 		if (resolved.where() instanceof FilterExpression.MatchAll) return;
 		sql.append(" AND ");

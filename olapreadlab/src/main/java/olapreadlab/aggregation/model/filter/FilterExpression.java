@@ -9,6 +9,7 @@ public sealed interface FilterExpression {
 
 	MatchAll MATCH_ALL = new MatchAll();
 
+	//where 1=1
 	record MatchAll() implements FilterExpression {
 	}
 
