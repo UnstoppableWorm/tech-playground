@@ -1,5 +1,19 @@
+test_runner: ubuntu-latest
 build_runner: ubuntu-latest
 deploy_runner: ubuntu-latest
+
+container_registry:
+  host: ghcr.io
+  namespace: "{{ registry_namespace | default('', true) }}"
+
+test_stage:
+  command:
+    - sh
+    - -ec
+    - |
+      test -f Dockerfile
+      test -f static/index.html
+      grep -q "GitHub Actions + Ansible Delivery" static/index.html
 
 deployment_environment:
   code: stg

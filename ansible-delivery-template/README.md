@@ -1,23 +1,24 @@
 # VM Migration Ansible CI/CD Template
 
-신규 클라우드 환경으로 VM을 이관할 때, GitLab CI 안에 섞여 있던 권역별·환경별 설정과 반복된 배포 스테이지를 분리한 구조를 GitHub Actions용으로 옮긴 템플릿입니다.
+신규 클라우드 환경으로 VM을 이관할 때, GitLab CI 안에 섞여 있던 권역별·환경별 설정과 반복 배포 스테이지를 분리한 GitHub Actions 템플릿입니다.
 
-GitHub Actions는 수동 실행, 시크릿 주입, runner 선택만 담당합니다. 실제 Harbor 로그인, 이미지 버저닝, 이미지 빌드와 push, VM 접속, 지정 버전 pull, 기존 이미지 정리, Compose 배포 흐름은 Ansible 플레이북으로 고정해 여러 애플리케이션이 같은 절차를 재사용할 수 있게 합니다.
+GitHub Actions는 수동 실행, runner 선택, GitHub Container Registry(GHCR) 인증만 담당합니다. 테스트, 이미지 버저닝, 이미지 빌드와 push, VM 접속, 지정 버전 pull, 기존 이미지 정리, Compose 배포는 Ansible 플레이북으로 고정해 여러 애플리케이션이 같은 절차를 재사용합니다.
 
-이 디렉터리는 현재 워크스페이스에서는 하위 프로젝트입니다. 별도 저장소로 분리하면 아래 구조가 저장소 루트 기준으로 그대로 동작합니다.
+이 디렉터리는 현재 워크스페이스의 하위 프로젝트입니다. 별도 저장소로 분리하면 아래 구조가 저장소 루트 기준으로 그대로 동작합니다.
 
 ## 구조
 
 ~~~text
 .
 ├── .cicd/
-│   ├── pipeline/                         # 권역별 빌드/배포 구성
+│   ├── pipeline/                         # 권역별 테스트/빌드/배포 구성
 │   │   ├── kr.yml
 │   │   ├── eu.yml
 │   │   └── na.yml
 │   ├── ansible/
 │   │   ├── inventories/hosts.yml
 │   │   ├── playbooks/                    # 모든 환경에서 재사용
+│   │   │   ├── test.yml
 │   │   │   ├── build.yml
 │   │   │   └── deploy.yml
 │   │   ├── templates/
@@ -25,7 +26,7 @@ GitHub Actions는 수동 실행, 시크릿 주입, runner 선택만 담당합니
 │   │       ├── kr/{stg,prd}.yml
 │   │       ├── eu/{stg,prd}.yml
 │   │       └── na/{stg,prd}.yml
-│   └── vars/                             # runner, 배포 정책 메타데이터
+│   └── vars/                             # runner, 레지스트리, 배포 정책
 │       ├── stg.yml
 │       └── prd.yml
 ├── .github/workflows/
@@ -39,49 +40,55 @@ GitHub Actions는 수동 실행, 시크릿 주입, runner 선택만 담당합니
 
 | 위치 | 책임 |
 | --- | --- |
-| .cicd/pipeline/{kr,eu,na}.yml | 권역별 파이프라인 이름과 해당 권역의 변수 루트 |
-| .cicd/vars/{stg,prd}.yml | GitHub runner, 순차 배포 수, 이미지 정리, 환경 공통 런타임 값 |
-| .cicd/ansible/vars/{country}/{env}.yml | Harbor 주소, 대상 VM 그룹, 포트, 도메인, 국가별 런타임 환경변수 |
-| .cicd/ansible/playbooks/*.yml | 빌드와 배포의 공통 절차 |
+| .cicd/pipeline/{kr,eu,na}.yml | 권역별 테스트·빌드·배포 작업 이름과 변수 루트 |
+| .cicd/vars/{stg,prd}.yml | GitHub runner, GHCR 설정, 테스트 명령, 순차 배포 수, 이미지 정리 정책 |
+| .cicd/ansible/vars/{country}/{env}.yml | 대상 VM 그룹, 포트, 도메인, 국가별 런타임 환경변수 |
+| .cicd/ansible/playbooks/*.yml | 테스트·빌드·배포의 공통 절차 |
 
 권역이나 검증/운영 환경을 추가할 때는 공통 플레이북을 복사하지 않습니다. 파이프라인 파일과 변수 파일만 추가 또는 수정합니다.
 
 ## GitHub Actions 흐름
 
-workflow_dispatch에서 country, deploy_env, release_mode, image_version을 선택하면 다음 파일이 함께 주입됩니다.
+`workflow_dispatch`에서 `country`, `deploy_env`, `release_mode`, `image_version`을 선택하면 다음 변수 파일이 함께 주입됩니다.
 
 ~~~text
 kr + stg
   -> .cicd/pipeline/kr.yml
   -> .cicd/vars/stg.yml
   -> .cicd/ansible/vars/kr/stg.yml
+  -> test.yml
   -> build.yml
   -> deploy.yml
 ~~~
 
-GitLab의 build_kr, deploy_kr 같은 국가별 job은 GitHub Actions의 입력값과 .cicd/pipeline/kr.yml로 대체했습니다. 환경별 runner 메타데이터는 .cicd/vars/{stg,prd}.yml에서 읽어 build/deploy job의 runs-on으로 사용합니다.
+`build_and_deploy` 모드에서는 `test -> build -> deploy` 순서로 실행합니다. 테스트가 실패하면 빌드는 시작하지 않습니다. `deploy_only` 모드는 기존 GHCR 이미지 버전만 pull하여 배포하므로 테스트와 빌드를 건너뜁니다.
 
-## 빌드와 배포 절차
+`test_stage.command`는 환경 변수 파일에서 관리합니다. 현재 템플릿은 Dockerfile과 정적 페이지를 검증하는 스모크 테스트를 실행합니다. 실제 애플리케이션에서는 같은 위치를 아래처럼 서비스의 테스트 명령으로 바꾸면 됩니다.
 
-build.yml은 제공된 country, deploy_env, image_version으로 변수 조합을 검증한 뒤 아래 순서로 실행합니다.
+~~~yaml
+test_stage:
+  command:
+    - ./gradlew
+    - test
+~~~
 
-1. Harbor 이미지 이름과 불변 버전 태그를 조합합니다.
-2. Dockerfile과 Docker CLI를 확인하고 Harbor에 로그인합니다.
-3. 버전과 Git revision OCI label을 넣어 이미지를 빌드합니다.
-4. 로컬 이미지 태그를 검증하고 Harbor에 version tag를 push합니다.
+## GHCR 이미지 흐름
 
-deploy.yml은 같은 country, deploy_env, image_version을 다시 받아 inventory의 대상 VM 그룹으로만 실행합니다.
+`build.yml`은 `ghcr.io/<GitHub 소유자>/delivery-template-app:<image_version>` 형태의 불변 태그를 생성합니다.
 
-1. Harbor에 로그인하고 지정한 version tag를 직접 pull합니다.
-2. 기존 대상 컨테이너가 사용 중인 이미지 ID를 기록합니다.
-3. 해당 국가·환경용 Compose 파일과 런타임 변수를 렌더링하고 컨테이너를 강제 재생성합니다.
-4. 새 릴리스 헬스체크가 성공한 뒤, 이전 대상 이미지가 다른 컨테이너에서 사용 중이지 않을 때만 제거합니다.
+1. `GITHUB_TOKEN`으로 GHCR에 로그인합니다.
+2. 버전, Git revision, 소스 저장소 OCI label을 넣어 이미지를 빌드합니다.
+3. 버전 태그를 GHCR에 push합니다.
 
-새 이미지 pull 또는 헬스체크가 실패하면 이전 이미지는 제거하지 않습니다.
+`deploy.yml`은 같은 이미지 버전을 대상 VM에서 직접 pull하고, 국가·환경별 Compose 파일을 렌더링해 컨테이너를 재생성합니다. 새 릴리스의 헬스체크가 성공한 뒤에만 이전 이미지 ID를 제거합니다. 새 이미지 pull 또는 헬스체크가 실패하면 이전 이미지는 제거하지 않습니다.
+
+build job의 `packages: write` 권한과 기본 `GITHUB_TOKEN`만으로 첫 GHCR 패키지가 생성됩니다. deploy job은 `packages: read` 토큰을 대상 VM의 `docker login ghcr.io`에 사용하므로 별도 레지스트리 시크릿이 필요하지 않습니다.
+
+GitHub Actions 밖에서 이미지를 pull하거나 VM에서 장기 토큰으로 pull하려면 GitHub PAT에 `read:packages` 권한을 부여해 `REGISTRY_TOKEN`으로 사용합니다. 익명 pull이 필요하면 첫 push 후 GitHub Packages의 Container package visibility를 Public으로 변경합니다.
 
 ## Docker 호환성
 
-빌드에는 CI runner에 설치된 Docker CLI를 사용하며 특정 docker:A, docker:B 이미지에 묶지 않습니다. 배포 플레이북은 대상 VM에서 docker compose를 먼저 확인하고, 없으면 legacy docker-compose를 자동 선택합니다. 따라서 VM의 Compose 세대가 달라도 같은 플레이북을 재사용할 수 있습니다.
+빌드에는 CI runner에 설치된 Docker CLI를 사용하며 특정 Docker 이미지 버전에 묶지 않습니다. 배포 플레이북은 대상 VM에서 `docker compose`를 먼저 확인하고, 없으면 legacy `docker-compose`를 자동 선택합니다. 따라서 VM의 Compose 세대가 달라도 같은 플레이북을 재사용할 수 있습니다.
 
 ## GitHub 환경과 시크릿
 
@@ -91,14 +98,12 @@ GitHub Environments를 아래처럼 권역과 환경 조합으로 생성합니�
 - eu-stg, eu-prd
 - na-stg, na-prd
 
-각 Environment에 아래 시크릿을 설정합니다.
+각 Environment에는 VM 접근용 시크릿만 설정합니다.
 
-- HARBOR_USERNAME
-- HARBOR_PASSWORD
 - SSH_PRIVATE_KEY
 - SSH_KNOWN_HOSTS
 
-SSH_KNOWN_HOSTS는 대상 VM의 host key를 포함해야 합니다. 실제 이관 환경에서는 .cicd/ansible/inventories/hosts.yml의 예시 호스트와 각 변수 파일의 Harbor, 도메인, 배포 경로를 실값으로 바꿉니다.
+`SSH_KNOWN_HOSTS`는 대상 VM의 host key를 포함해야 합니다. 실제 이관 환경에서는 `.cicd/ansible/inventories/hosts.yml`의 예시 호스트와 각 변수 파일의 도메인, 배포 경로를 실값으로 바꿉니다.
 
 ## 로컬 검증
 
@@ -108,7 +113,10 @@ python -m pip install ansible-core==2.17.7
 export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
 
 ansible-inventory --graph
-ansible-playbook .cicd/ansible/playbooks/build.yml --syntax-check -e country=kr -e deploy_env=stg -e image_version=syntax-check -e @.cicd/pipeline/kr.yml -e @.cicd/vars/stg.yml -e @.cicd/ansible/vars/kr/stg.yml
+ansible-playbook .cicd/ansible/playbooks/test.yml \
+  -e country=kr -e deploy_env=stg -e project_root="$PWD" \
+  -e @.cicd/pipeline/kr.yml -e @.cicd/vars/stg.yml \
+  -e @.cicd/ansible/vars/kr/stg.yml
 ~~~
 
-실제 수동 배포는 build.yml과 deploy.yml에 같은 세 개의 변수 파일을 주입해 실행합니다. GitHub Actions workflow가 이 호출을 그대로 자동화합니다.
+실제 로컬 GHCR push는 `REGISTRY_USERNAME`, `REGISTRY_TOKEN`, `registry_namespace`를 제공해 `build.yml`을 호출합니다. GitHub Actions workflow는 이 호출을 자동화하며, 저장소 owner를 `registry_namespace`로 주입합니다.

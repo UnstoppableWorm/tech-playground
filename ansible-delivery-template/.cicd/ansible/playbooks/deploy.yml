@@ -4,8 +4,8 @@
   gather_facts: false
   serial: "{{ deployment_environment.deploy_serial | default('100%') }}"
   vars:
-    harbor_username: "{{ lookup('ansible.builtin.env', 'HARBOR_USERNAME') }}"
-    harbor_password: "{{ lookup('ansible.builtin.env', 'HARBOR_PASSWORD') }}"
+    registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') }}"
+    registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
   pre_tasks:
     - name: Validate selected country, environment, target, and image version
       ansible.builtin.assert:
@@ -15,21 +15,21 @@
           - target.group in group_names
           - target.deployment_root | length > 0
           - release.app_name | length > 0
-          - release.harbor.registry | length > 0
-          - release.harbor.project | length > 0
+          - container_registry.host | default('') | length > 0
+          - container_registry.namespace | default('') | length > 0
           - release.image_name | length > 0
           - image_version | default('') is match('^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
-          - harbor_username | default('') | length > 0
-          - harbor_password | default('') | length > 0
-        fail_msg: Check country, deploy environment, inventory target, image_version, and Harbor secrets.
+          - registry_username | default('') | length > 0
+          - registry_token | default('') | length > 0
+        fail_msg: Check country, deploy environment, inventory target, image_version, and registry credentials.
   tasks:
     - name: Resolve the requested versioned image and deployment paths
       ansible.builtin.set_fact:
         deployment_root: "{{ target.deployment_root }}"
         compose_file_path: "{{ target.deployment_root }}/docker-compose.yml"
         runtime_env_file_path: "{{ target.deployment_root }}/app.env"
-        release_repository: "{{ release.harbor.registry }}/{{ release.harbor.project }}/{{ release.image_name }}"
-        release_image: "{{ release.harbor.registry }}/{{ release.harbor.project }}/{{ release.image_name }}:{{ image_version }}"
+        release_repository: "{{ container_registry.host | lower }}/{{ container_registry.namespace | lower }}/{{ release.image_name | lower }}"
+        release_image: "{{ container_registry.host | lower }}/{{ container_registry.namespace | lower }}/{{ release.image_name | lower }}:{{ image_version }}"
         deployed_container_name: "{{ release.app_name }}-{{ target.name }}"
         compose_project_name: "{{ release.app_name }}-{{ target.name }}"
 
@@ -44,16 +44,16 @@
           - version
       changed_when: false
 
-    - name: Login to Harbor from the target VM
+    - name: Login to the container registry from the target VM
       ansible.builtin.command:
         argv:
           - docker
           - login
-          - "{{ release.harbor.registry }}"
+          - "{{ container_registry.host }}"
           - --username
-          - "{{ harbor_username }}"
+          - "{{ registry_username }}"
           - --password-stdin
-        stdin: "{{ harbor_password }}"
+        stdin: "{{ registry_token }}"
       no_log: true
       changed_when: true
 

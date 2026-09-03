@@ -10,9 +10,6 @@ target:
 release:
   app_name: delivery-template-app
   image_name: delivery-template-app
-  harbor:
-    registry: registry-na.internal.example.com
-    project: applications
   runtime_env:
     TZ: America/Toronto
     APP_REGION: na

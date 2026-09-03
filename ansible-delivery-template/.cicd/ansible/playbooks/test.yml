@@ -1,0 +1,28 @@
+---
+- name: Run tests before building a country-specific release
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    resolved_project_root: "{{ project_root | default(playbook_dir ~ '/../../..', true) }}"
+    # Only localhost tests need a project-local temporary directory.
+    ansible_remote_tmp: "{{ resolved_project_root }}/.ansible/remote_tmp"
+  pre_tasks:
+    - name: Validate selected country, environment, and test command
+      ansible.builtin.assert:
+        that:
+          - pipeline.country == country
+          - deployment_environment.code == deploy_env
+          - test_stage.command is defined
+          - test_stage.command | length > 0
+        fail_msg: Check country, deploy environment, and test_stage.command.
+  tasks:
+    - name: Run the configured project test command
+      ansible.builtin.command:
+        argv: "{{ test_stage.command }}"
+      args:
+        chdir: "{{ resolved_project_root }}"
+      environment:
+        APP_COUNTRY: "{{ country }}"
+        APP_ENV: "{{ deploy_env }}"
+      changed_when: false

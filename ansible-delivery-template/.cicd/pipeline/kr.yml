@@ -1,5 +1,6 @@
 pipeline:
   country: kr
+  test_job_name: test_kr
   build_job_name: build_kr
   deploy_job_name: deploy_kr
   ansible_var_root: .cicd/ansible/vars/kr

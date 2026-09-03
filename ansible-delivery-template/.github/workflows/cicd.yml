@@ -27,7 +27,7 @@ on:
           - build_and_deploy
           - deploy_only
       image_version:
-        description: Immutable Harbor image version; defaults to the Git commit SHA
+        description: Immutable GHCR image version; defaults to the Git commit SHA
         required: false
         default: ""
 
@@ -43,8 +43,10 @@ jobs:
     name: Resolve environment metadata
     runs-on: ubuntu-latest
     outputs:
+      test_runner: ${{ steps.metadata.outputs.test_runner }}
       build_runner: ${{ steps.metadata.outputs.build_runner }}
       deploy_runner: ${{ steps.metadata.outputs.deploy_runner }}
+      test_job_name: ${{ steps.metadata.outputs.test_job_name }}
       build_job_name: ${{ steps.metadata.outputs.build_job_name }}
       deploy_job_name: ${{ steps.metadata.outputs.deploy_job_name }}
       country_var_root: ${{ steps.metadata.outputs.country_var_root }}
@@ -64,29 +66,77 @@ jobs:
 
           metadata_file=".cicd/vars/${DEPLOY_ENV}.yml"
           pipeline_file=".cicd/pipeline/${COUNTRY}.yml"
+          test_runner="$(sed -n 's/^test_runner:[[:space:]]*//p' "$metadata_file")"
           build_runner="$(sed -n 's/^build_runner:[[:space:]]*//p' "$metadata_file")"
           deploy_runner="$(sed -n 's/^deploy_runner:[[:space:]]*//p' "$metadata_file")"
           pipeline_country="$(sed -n 's/^  country:[[:space:]]*//p' "$pipeline_file")"
+          test_job_name="$(sed -n 's/^  test_job_name:[[:space:]]*//p' "$pipeline_file")"
           build_job_name="$(sed -n 's/^  build_job_name:[[:space:]]*//p' "$pipeline_file")"
           deploy_job_name="$(sed -n 's/^  deploy_job_name:[[:space:]]*//p' "$pipeline_file")"
           country_var_root="$(sed -n 's/^  ansible_var_root:[[:space:]]*//p' "$pipeline_file")"
 
+          test -n "$test_runner"
           test -n "$build_runner"
           test -n "$deploy_runner"
           test "$pipeline_country" = "$COUNTRY"
+          test -n "$test_job_name"
           test -n "$build_job_name"
           test -n "$deploy_job_name"
           test -n "$country_var_root"
+          printf 'test_runner=%s\n' "$test_runner" >> "$GITHUB_OUTPUT"
           printf 'build_runner=%s\n' "$build_runner" >> "$GITHUB_OUTPUT"
           printf 'deploy_runner=%s\n' "$deploy_runner" >> "$GITHUB_OUTPUT"
+          printf 'test_job_name=%s\n' "$test_job_name" >> "$GITHUB_OUTPUT"
           printf 'build_job_name=%s\n' "$build_job_name" >> "$GITHUB_OUTPUT"
           printf 'deploy_job_name=%s\n' "$deploy_job_name" >> "$GITHUB_OUTPUT"
           printf 'country_var_root=%s\n' "$country_var_root" >> "$GITHUB_OUTPUT"
 
+  test:
+    name: ${{ needs.resolve.outputs.test_job_name }} (${{ inputs.deploy_env }})
+    needs: resolve
+    if: ${{ needs.resolve.result == 'success' && inputs.release_mode == 'build_and_deploy' }}
+    runs-on: ${{ needs.resolve.outputs.test_runner }}
+    timeout-minutes: 15
+    env:
+      ANSIBLE_FORCE_COLOR: "true"
+      PY_COLORS: "1"
+      COUNTRY: ${{ inputs.country }}
+      DEPLOY_ENV: ${{ inputs.deploy_env }}
+      COUNTRY_VAR_ROOT: ${{ needs.resolve.outputs.country_var_root }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ansible-core==2.17.7
+
+      - name: Run tests before the image build
+        run: |
+          export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
+          ansible-playbook .cicd/ansible/playbooks/test.yml -e "country=${COUNTRY}" -e "deploy_env=${DEPLOY_ENV}" -e "project_root=${GITHUB_WORKSPACE}" -e "@.cicd/pipeline/${COUNTRY}.yml" -e "@.cicd/vars/${DEPLOY_ENV}.yml" -e "@${COUNTRY_VAR_ROOT}/${DEPLOY_ENV}.yml"
+
   build:
     name: ${{ needs.resolve.outputs.build_job_name }} (${{ inputs.deploy_env }})
-    needs: resolve
-    if: ${{ inputs.release_mode == 'build_and_deploy' }}
+    permissions:
+      contents: read
+      packages: write
+    needs:
+      - resolve
+      - test
+    if: >-
+      ${{
+        always()
+        && needs.resolve.result == 'success'
+        && needs.test.result == 'success'
+        && inputs.release_mode == 'build_and_deploy'
+      }}
     runs-on: ${{ needs.resolve.outputs.build_runner }}
     timeout-minutes: 30
     environment:
@@ -98,8 +148,9 @@ jobs:
       DEPLOY_ENV: ${{ inputs.deploy_env }}
       COUNTRY_VAR_ROOT: ${{ needs.resolve.outputs.country_var_root }}
       IMAGE_VERSION: ${{ inputs.image_version != '' && inputs.image_version || github.sha }}
-      HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
-      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      REGISTRY_NAMESPACE: ${{ github.repository_owner }}
+      REGISTRY_USERNAME: ${{ github.actor }}
+      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -117,18 +168,25 @@ jobs:
       - name: Build and push the release image
         run: |
           export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
-          ansible-playbook .cicd/ansible/playbooks/build.yml -e "country=${COUNTRY}" -e "deploy_env=${DEPLOY_ENV}" -e "image_version=${IMAGE_VERSION}" -e "image_revision=${GITHUB_SHA}" -e "project_root=${GITHUB_WORKSPACE}" -e "@.cicd/pipeline/${COUNTRY}.yml" -e "@.cicd/vars/${DEPLOY_ENV}.yml" -e "@${COUNTRY_VAR_ROOT}/${DEPLOY_ENV}.yml"
+          ansible-playbook .cicd/ansible/playbooks/build.yml -e "country=${COUNTRY}" -e "deploy_env=${DEPLOY_ENV}" -e "image_version=${IMAGE_VERSION}" -e "image_revision=${GITHUB_SHA}" -e "image_source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" -e "registry_namespace=${REGISTRY_NAMESPACE}" -e "project_root=${GITHUB_WORKSPACE}" -e "@.cicd/pipeline/${COUNTRY}.yml" -e "@.cicd/vars/${DEPLOY_ENV}.yml" -e "@${COUNTRY_VAR_ROOT}/${DEPLOY_ENV}.yml"
 
   deploy:
     name: ${{ needs.resolve.outputs.deploy_job_name }} (${{ inputs.deploy_env }})
+    permissions:
+      contents: read
+      packages: read
     needs:
       - resolve
+      - test
       - build
     if: >-
       ${{
         always()
         && needs.resolve.result == 'success'
-        && (inputs.release_mode == 'deploy_only' || needs.build.result == 'success')
+        && (
+          inputs.release_mode == 'deploy_only'
+          || (needs.test.result == 'success' && needs.build.result == 'success')
+        )
       }}
     runs-on: ${{ needs.resolve.outputs.deploy_runner }}
     timeout-minutes: 30
@@ -141,8 +199,9 @@ jobs:
       DEPLOY_ENV: ${{ inputs.deploy_env }}
       COUNTRY_VAR_ROOT: ${{ needs.resolve.outputs.country_var_root }}
       IMAGE_VERSION: ${{ inputs.image_version != '' && inputs.image_version || github.sha }}
-      HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
-      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      REGISTRY_NAMESPACE: ${{ github.repository_owner }}
+      REGISTRY_USERNAME: ${{ github.actor }}
+      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
     steps:
@@ -173,4 +232,4 @@ jobs:
       - name: Pull and deploy the release image
         run: |
           export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
-          ansible-playbook .cicd/ansible/playbooks/deploy.yml -e "country=${COUNTRY}" -e "deploy_env=${DEPLOY_ENV}" -e "image_version=${IMAGE_VERSION}" -e "image_revision=${GITHUB_SHA}" -e "@.cicd/pipeline/${COUNTRY}.yml" -e "@.cicd/vars/${DEPLOY_ENV}.yml" -e "@${COUNTRY_VAR_ROOT}/${DEPLOY_ENV}.yml"
+          ansible-playbook .cicd/ansible/playbooks/deploy.yml -e "country=${COUNTRY}" -e "deploy_env=${DEPLOY_ENV}" -e "image_version=${IMAGE_VERSION}" -e "image_revision=${GITHUB_SHA}" -e "registry_namespace=${REGISTRY_NAMESPACE}" -e "@.cicd/pipeline/${COUNTRY}.yml" -e "@.cicd/vars/${DEPLOY_ENV}.yml" -e "@${COUNTRY_VAR_ROOT}/${DEPLOY_ENV}.yml"

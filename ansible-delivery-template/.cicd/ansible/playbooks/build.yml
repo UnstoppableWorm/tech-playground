@@ -4,8 +4,11 @@
   connection: local
   gather_facts: false
   vars:
-    harbor_username: "{{ lookup('ansible.builtin.env', 'HARBOR_USERNAME') }}"
-    harbor_password: "{{ lookup('ansible.builtin.env', 'HARBOR_PASSWORD') }}"
+    registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') }}"
+    registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
+    resolved_project_root: "{{ project_root | default(playbook_dir ~ '/../../..', true) }}"
+    # The build runs on localhost, unlike the remote deployment playbook.
+    ansible_remote_tmp: "{{ resolved_project_root }}/.ansible/remote_tmp"
   pre_tasks:
     - name: Validate selected country, environment, and image version
       ansible.builtin.assert:
@@ -13,21 +16,20 @@
           - pipeline.country == country
           - deployment_environment.code == deploy_env
           - release.app_name | length > 0
-          - release.harbor.registry | length > 0
-          - release.harbor.project | length > 0
+          - container_registry.host | default('') | length > 0
+          - container_registry.namespace | default('') | length > 0
           - release.image_name | length > 0
           - image_version | default('') is match('^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
-          - harbor_username | default('') | length > 0
-          - harbor_password | default('') | length > 0
-        fail_msg: Check country, deploy environment, image_version, Harbor settings, and Harbor secrets.
+          - registry_username | default('') | length > 0
+          - registry_token | default('') | length > 0
+        fail_msg: Check country, deploy environment, image_version, registry settings, and registry credentials.
   tasks:
     - name: Resolve the immutable versioned image name
       ansible.builtin.set_fact:
-        release_repository: "{{ release.harbor.registry }}/{{ release.harbor.project }}/{{ release.image_name }}"
-        release_image: "{{ release.harbor.registry }}/{{ release.harbor.project }}/{{ release.image_name }}:{{ image_version }}"
+        release_repository: "{{ container_registry.host | lower }}/{{ container_registry.namespace | lower }}/{{ release.image_name | lower }}"
+        release_image: "{{ container_registry.host | lower }}/{{ container_registry.namespace | lower }}/{{ release.image_name | lower }}:{{ image_version }}"
         release_revision: "{{ image_revision | default(image_version, true) }}"
-        resolved_project_root: "{{ project_root | default(playbook_dir ~ '/../../..', true) }}"
-        resolved_dockerfile_path: "{{ (project_root | default(playbook_dir ~ '/../../..', true)) }}/Dockerfile"
+        resolved_dockerfile_path: "{{ resolved_project_root }}/Dockerfile"
 
     - name: Ensure the Docker build context exists
       ansible.builtin.stat:
@@ -47,16 +49,16 @@
           - version
       changed_when: false
 
-    - name: Login to Harbor from the build runner
+    - name: Login to the container registry from the build runner
       ansible.builtin.command:
         argv:
           - docker
           - login
-          - "{{ release.harbor.registry }}"
+          - "{{ container_registry.host }}"
           - --username
-          - "{{ harbor_username }}"
+          - "{{ registry_username }}"
           - --password-stdin
-        stdin: "{{ harbor_password }}"
+        stdin: "{{ registry_token }}"
       no_log: true
       changed_when: true
 
@@ -74,6 +76,8 @@
           - "org.opencontainers.image.version={{ image_version }}"
           - --label
           - "org.opencontainers.image.revision={{ release_revision }}"
+          - --label
+          - "org.opencontainers.image.source={{ image_source | default('', true) }}"
           - --build-arg
           - "APP_VERSION={{ image_version }}"
           - "{{ resolved_project_root }}"
@@ -88,7 +92,7 @@
           - "{{ release_image }}"
       changed_when: false
 
-    - name: Push the immutable versioned image to Harbor
+    - name: Push the immutable versioned image to the container registry
       ansible.builtin.command:
         argv:
           - docker
