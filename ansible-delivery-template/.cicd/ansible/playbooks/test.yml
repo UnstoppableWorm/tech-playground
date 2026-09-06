@@ -4,9 +4,20 @@
   connection: local
   gather_facts: false
   vars:
-    resolved_project_root: "{{ project_root | default(playbook_dir ~ '/../../..', true) }}"
+    country: "{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}"
+    deploy_env: "{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}"
+    resolved_project_root: >-
+      {{
+        lookup('ansible.builtin.env', 'PROJECT_ROOT')
+        | default(lookup('ansible.builtin.env', 'GITHUB_WORKSPACE'), true)
+        | default(playbook_dir ~ '/../../..', true)
+      }}
     # Only localhost tests need a project-local temporary directory.
     ansible_remote_tmp: "{{ resolved_project_root }}/.ansible/remote_tmp"
+  vars_files:
+    - "{{ playbook_dir }}/../../pipeline/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}.yml"
+    - "{{ playbook_dir }}/../../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
+    - "{{ playbook_dir }}/../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
   pre_tasks:
     - name: Validate selected country, environment, and test command
       ansible.builtin.assert:

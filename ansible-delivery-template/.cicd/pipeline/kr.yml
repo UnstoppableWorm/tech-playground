@@ -1,3 +1,2 @@
 pipeline:
   country: kr
-  ansible_var_root: .cicd/ansible/vars/kr

@@ -18,16 +18,6 @@ on:
         required: true
         type: choice
         options: [stg, prd]
-      release_mode:
-        description: Build a new image or deploy an existing one
-        required: true
-        type: choice
-        default: build_and_deploy
-        options: [build_and_deploy, deploy_only]
-      image_version:
-        description: Existing image tag for deploy_only; otherwise v1.<run number>
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -36,138 +26,48 @@ env:
   ANSIBLE_FORCE_COLOR: "true"
   PY_COLORS: "1"
   ANSIBLE_CONFIG: .cicd/ansible/ansible.cfg
+  DEPLOY_COUNTRY: ${{ inputs.country || 'kr' }}
+  DEPLOY_ENV: ${{ inputs.deploy_env || (github.ref_name == 'prd' && 'prd' || 'stg') }}
+  IMAGE_VERSION: v1.${{ github.run_number }}
 
 concurrency:
-  group: regional-cicd-${{ github.workflow }}-${{ github.ref }}
+  group: regional-cicd-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  resolve:
-    name: Resolve deployment context
-    runs-on: ubuntu-latest
-    outputs:
-      country: ${{ steps.context.outputs.country }}
-      deploy_env: ${{ steps.context.outputs.deploy_env }}
-      release_mode: ${{ steps.context.outputs.release_mode }}
-      image_version: ${{ steps.context.outputs.image_version }}
-      country_var_root: ${{ steps.context.outputs.country_var_root }}
-      test_runner: ${{ steps.context.outputs.test_runner }}
-      build_runner: ${{ steps.context.outputs.build_runner }}
-      deploy_runner: ${{ steps.context.outputs.deploy_runner }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: context
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BRANCH_NAME: ${{ github.ref_name }}
-          INPUT_COUNTRY: ${{ github.event.inputs.country || '' }}
-          INPUT_DEPLOY_ENV: ${{ github.event.inputs.deploy_env || '' }}
-          INPUT_RELEASE_MODE: ${{ github.event.inputs.release_mode || '' }}
-          INPUT_IMAGE_VERSION: ${{ github.event.inputs.image_version || '' }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            country="$INPUT_COUNTRY"
-            deploy_env="$INPUT_DEPLOY_ENV"
-            release_mode="$INPUT_RELEASE_MODE"
-          else
-            country=kr
-            release_mode=build_and_deploy
-            case "$BRANCH_NAME" in
-              feature/*|stg) deploy_env=stg ;;
-              prd) deploy_env=prd ;;
-              *) exit 1 ;;
-            esac
-          fi
-
-          case "$country" in kr|eu|na) ;; *) exit 1 ;; esac
-          case "$deploy_env" in stg|prd) ;; *) exit 1 ;; esac
-          case "$release_mode" in build_and_deploy|deploy_only) ;; *) exit 1 ;; esac
-          if [ "$release_mode" = deploy_only ] && [ -z "$INPUT_IMAGE_VERSION" ]; then
-            echo "deploy_only requires image_version" >&2
-            exit 1
-          fi
-
-          metadata_file=".cicd/vars/${deploy_env}.yml"
-          pipeline_file=".cicd/pipeline/${country}.yml"
-          country_var_root="$(sed -n 's/^  ansible_var_root:[[:space:]]*//p' "$pipeline_file")"
-          test_runner="$(sed -n 's/^test_runner:[[:space:]]*//p' "$metadata_file")"
-          build_runner="$(sed -n 's/^build_runner:[[:space:]]*//p' "$metadata_file")"
-          deploy_runner="$(sed -n 's/^deploy_runner:[[:space:]]*//p' "$metadata_file")"
-          test -n "$country_var_root"
-          test -n "$test_runner"
-          test -n "$build_runner"
-          test -n "$deploy_runner"
-
-          image_version="${INPUT_IMAGE_VERSION:-v1.${GITHUB_RUN_NUMBER}}"
-          [[ "$image_version" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]
-          printf 'country=%s\n' "$country" >> "$GITHUB_OUTPUT"
-          printf 'deploy_env=%s\n' "$deploy_env" >> "$GITHUB_OUTPUT"
-          printf 'release_mode=%s\n' "$release_mode" >> "$GITHUB_OUTPUT"
-          printf 'image_version=%s\n' "$image_version" >> "$GITHUB_OUTPUT"
-          printf 'country_var_root=%s\n' "$country_var_root" >> "$GITHUB_OUTPUT"
-          printf 'test_runner=%s\n' "$test_runner" >> "$GITHUB_OUTPUT"
-          printf 'build_runner=%s\n' "$build_runner" >> "$GITHUB_OUTPUT"
-          printf 'deploy_runner=%s\n' "$deploy_runner" >> "$GITHUB_OUTPUT"
-
   test:
-    name: Test (${{ needs.resolve.outputs.country }}/${{ needs.resolve.outputs.deploy_env }})
-    needs: resolve
-    if: ${{ needs.resolve.outputs.release_mode == 'build_and_deploy' }}
-    runs-on: ${{ needs.resolve.outputs.test_runner }}
+    name: Test
+    runs-on: ubuntu-latest
     steps:
       - uses: ./.github/actions/setup-ansible
-      - run: >-
-          ansible-playbook .cicd/ansible/playbooks/test.yml
-          -e "country=${{ needs.resolve.outputs.country }}"
-          -e "deploy_env=${{ needs.resolve.outputs.deploy_env }}"
-          -e "project_root=${{ github.workspace }}"
-          -e "@.cicd/pipeline/${{ needs.resolve.outputs.country }}.yml"
-          -e "@.cicd/vars/${{ needs.resolve.outputs.deploy_env }}.yml"
-          -e "@${{ needs.resolve.outputs.country_var_root }}/${{ needs.resolve.outputs.deploy_env }}.yml"
+      - name: Run configured tests
+        run: ansible-playbook .cicd/ansible/playbooks/test.yml
 
   build:
-    name: Build (${{ needs.resolve.outputs.country }}/${{ needs.resolve.outputs.deploy_env }})
-    needs: [resolve, test]
-    if: ${{ always() && needs.resolve.result == 'success' && needs.test.result == 'success' && needs.resolve.outputs.release_mode == 'build_and_deploy' }}
-    runs-on: ${{ needs.resolve.outputs.build_runner }}
+    name: Build and push image
+    needs: test
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     env:
-      REGISTRY_NAMESPACE: ${{ github.repository_owner }}
-      REGISTRY_USERNAME: ${{ github.actor }}
-      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: ./.github/actions/setup-ansible
-      - run: >-
-          ansible-playbook .cicd/ansible/playbooks/build.yml
-          -e "country=${{ needs.resolve.outputs.country }}"
-          -e "deploy_env=${{ needs.resolve.outputs.deploy_env }}"
-          -e "image_version=${{ needs.resolve.outputs.image_version }}"
-          -e "image_revision=${{ github.sha }}"
-          -e "image_source=${{ github.server_url }}/${{ github.repository }}"
-          -e "registry_namespace=${REGISTRY_NAMESPACE}"
-          -e "project_root=${{ github.workspace }}"
-          -e "@.cicd/pipeline/${{ needs.resolve.outputs.country }}.yml"
-          -e "@.cicd/vars/${{ needs.resolve.outputs.deploy_env }}.yml"
-          -e "@${{ needs.resolve.outputs.country_var_root }}/${{ needs.resolve.outputs.deploy_env }}.yml"
+      - name: Build and publish the configured image
+        run: ansible-playbook .cicd/ansible/playbooks/build.yml
 
   deploy:
-    name: Deploy (${{ needs.resolve.outputs.country }}/${{ needs.resolve.outputs.deploy_env }})
-    needs: [resolve, test, build]
-    if: ${{ always() && needs.resolve.result == 'success' && (needs.resolve.outputs.release_mode == 'deploy_only' || needs.build.result == 'success') }}
-    runs-on: ${{ needs.resolve.outputs.deploy_runner }}
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
     environment:
-      name: ${{ format('{0}-{1}', needs.resolve.outputs.country, needs.resolve.outputs.deploy_env) }}
+      name: ${{ format('{0}-{1}', inputs.country || 'kr', inputs.deploy_env || (github.ref_name == 'prd' && 'prd' || 'stg')) }}
     env:
-      REGISTRY_NAMESPACE: ${{ github.repository_owner }}
-      REGISTRY_USERNAME: ${{ github.actor }}
-      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
     steps:
@@ -180,12 +80,5 @@ jobs:
           chmod 600 "$RUNNER_TEMP/deploy-ssh/id_rsa"
           printf 'ANSIBLE_PRIVATE_KEY_FILE=%s\n' "$RUNNER_TEMP/deploy-ssh/id_rsa" >> "$GITHUB_ENV"
           printf 'ANSIBLE_SSH_ARGS=%s\n' "-o UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
-      - run: >-
-          ansible-playbook .cicd/ansible/playbooks/deploy.yml
-          -e "country=${{ needs.resolve.outputs.country }}"
-          -e "deploy_env=${{ needs.resolve.outputs.deploy_env }}"
-          -e "image_version=${{ needs.resolve.outputs.image_version }}"
-          -e "registry_namespace=${REGISTRY_NAMESPACE}"
-          -e "@.cicd/pipeline/${{ needs.resolve.outputs.country }}.yml"
-          -e "@.cicd/vars/${{ needs.resolve.outputs.deploy_env }}.yml"
-          -e "@${{ needs.resolve.outputs.country_var_root }}/${{ needs.resolve.outputs.deploy_env }}.yml"
+      - name: Deploy the requested image version
+        run: ansible-playbook .cicd/ansible/playbooks/deploy.yml

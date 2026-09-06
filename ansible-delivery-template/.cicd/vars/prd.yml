@@ -1,7 +1,3 @@
-test_runner: ubuntu-latest
-build_runner: ubuntu-latest
-deploy_runner: ubuntu-latest
-
 project_name: delivery-template-prd
 
 deployment_ssh:

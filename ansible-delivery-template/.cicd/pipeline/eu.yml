@@ -1,3 +1,2 @@
 pipeline:
   country: eu
-  ansible_var_root: .cicd/ansible/vars/eu

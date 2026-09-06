@@ -51,11 +51,15 @@ jobs:
 
       - name: Validate inventory and playbook syntax
         env:
-          COUNTRY: ${{ matrix.country }}
+          DEPLOY_COUNTRY: ${{ matrix.country }}
           DEPLOY_ENV: ${{ matrix.deploy_env }}
+          IMAGE_VERSION: v1.syntax-check
+          REGISTRY_NAMESPACE: validation
+          REGISTRY_USERNAME: validation
+          REGISTRY_TOKEN: validation
         run: |
           export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
           ansible-inventory --graph
           for playbook in test build deploy; do
-            ansible-playbook ".cicd/ansible/playbooks/${playbook}.yml" --syntax-check -e "country=${COUNTRY}" -e "deploy_env=${DEPLOY_ENV}" -e "image_version=syntax-check" -e "registry_namespace=validation" -e "@.cicd/pipeline/${COUNTRY}.yml" -e "@.cicd/vars/${DEPLOY_ENV}.yml" -e "@.cicd/ansible/vars/${COUNTRY}/${DEPLOY_ENV}.yml"
+            ansible-playbook ".cicd/ansible/playbooks/${playbook}.yml" --syntax-check
           done

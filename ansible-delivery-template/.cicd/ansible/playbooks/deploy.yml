@@ -5,7 +5,19 @@
   connection: local
   gather_facts: false
   vars:
+    country: "{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}"
+    deploy_env: "{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}"
+    image_version: "{{ lookup('ansible.builtin.env', 'IMAGE_VERSION') }}"
+    registry_namespace: >-
+      {{
+        lookup('ansible.builtin.env', 'REGISTRY_NAMESPACE')
+        | default(lookup('ansible.builtin.env', 'GITHUB_REPOSITORY_OWNER'), true)
+      }}
     dynamic_target_group: "delivery_{{ country }}_{{ deploy_env }}"
+  vars_files:
+    - "{{ playbook_dir }}/../../pipeline/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}.yml"
+    - "{{ playbook_dir }}/../../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
+    - "{{ playbook_dir }}/../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
   pre_tasks:
     - name: Validate selected country, environment, and target servers
       ansible.builtin.assert:
@@ -41,12 +53,32 @@
         label: "{{ item.name | default(item.host, true) }}"
 
 - name: Deploy a country-specific release to registered target servers
-  hosts: "delivery_{{ country }}_{{ deploy_env }}"
+  hosts: "delivery_{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}_{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}"
   gather_facts: false
   serial: "{{ deployment_environment.deploy_serial | default(1) }}"
   vars:
-    registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') }}"
-    registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
+    country: "{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}"
+    deploy_env: "{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}"
+    image_version: "{{ lookup('ansible.builtin.env', 'IMAGE_VERSION') }}"
+    registry_namespace: >-
+      {{
+        lookup('ansible.builtin.env', 'REGISTRY_NAMESPACE')
+        | default(lookup('ansible.builtin.env', 'GITHUB_REPOSITORY_OWNER'), true)
+      }}
+    registry_username: >-
+      {{
+        lookup('ansible.builtin.env', 'REGISTRY_USERNAME')
+        | default(lookup('ansible.builtin.env', 'GITHUB_ACTOR'), true)
+      }}
+    registry_token: >-
+      {{
+        lookup('ansible.builtin.env', 'REGISTRY_TOKEN')
+        | default(lookup('ansible.builtin.env', 'GITHUB_TOKEN'), true)
+      }}
+  vars_files:
+    - "{{ playbook_dir }}/../../pipeline/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}.yml"
+    - "{{ playbook_dir }}/../../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
+    - "{{ playbook_dir }}/../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
   pre_tasks:
     - name: Validate the deployment context and registry credentials
       ansible.builtin.assert:
