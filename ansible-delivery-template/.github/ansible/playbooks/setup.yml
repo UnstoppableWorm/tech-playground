@@ -1,7 +1,7 @@
 ---
 # The first workflow job bootstraps a temporary controller, then this playbook
 # builds the reusable controller image with the same Docker modules as delivery.
-- name: Build and publish the Ansible controller runtime
+- name: Set up and publish the reusable Ansible controller runtime
   hosts: localhost
   connection: local
   gather_facts: false

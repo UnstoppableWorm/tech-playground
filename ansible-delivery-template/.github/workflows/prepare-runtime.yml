@@ -38,4 +38,4 @@ jobs:
           RUNTIME_IMAGE_TAG: runtime-${{ github.sha }}
           REGISTRY_USERNAME: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ github.token }}
-        run: ansible-playbook .github/ansible/playbooks/build_runtime.yml
+        run: ansible-playbook .github/ansible/playbooks/setup.yml

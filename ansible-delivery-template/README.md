@@ -15,7 +15,7 @@
 │   │   ├── requirements.yml                   # pinned community.docker collection
 │   │   ├── runtime/Dockerfile                 # Java + Docker + Ansible controller image
 │   │   ├── playbooks/
-│   │   │   ├── build_runtime.yml               # controller runtime image build and push
+│   │   │   ├── setup.yml                       # controller runtime image setup and publish
 │   │   │   ├── test.yml                       # Maven test -> JAR smoke test
 │   │   │   ├── build.yml                      # GHCR build and push
 │   │   │   ├── deploy.yml                     # SSH runtime inventory and serial deploy
@@ -42,15 +42,15 @@
 
 ~~~text
 cicd.yml
-  -> prepare-runtime.yml -> build_runtime.yml -> GHCR controller runtime
+  -> prepare-runtime.yml -> setup.yml -> GHCR controller runtime
   -> test.yml   -> test.yml playbook
   -> build.yml  -> build.yml playbook
   -> deploy.yml -> deploy.yml playbook -> deploy_single_server.yml
 ~~~
 
-`prepare-runtime.yml`만 최초 부트스트랩을 위해 임시 Python/Ansible controller를 설치합니다. 이 controller가 `build_runtime.yml`을 호출해 Docker client, Docker Python SDK, Ansible Core, `community.docker`, Java 21, Maven, Git, SSH client를 포함한 이미지를 GHCR에 `runtime-${GITHUB_SHA}` 태그로 publish합니다. 이어지는 `test`, `build`, `deploy` job은 이 source-addressed 이미지를 job container로 사용하므로 Ansible이나 Java를 다시 설치하지 않습니다.
+`prepare-runtime.yml`만 최초 부트스트랩을 위해 임시 Python/Ansible controller를 설치합니다. 이 controller가 `setup.yml`을 호출해 Docker client, Docker Python SDK, Ansible Core, `community.docker`, Java 21, Maven, Git, SSH client를 포함한 이미지를 GHCR에 `runtime-${GITHUB_SHA}` 태그로 publish합니다. 이어지는 `test`, `build`, `deploy` job은 이 source-addressed 이미지를 job container로 사용하므로 Ansible이나 Java를 다시 설치하지 않습니다.
 
-이 부트스트랩은 순환 의존을 끊기 위한 한 번의 예외입니다. Ansible 이미지가 아직 없을 때에는 Ansible로 그 이미지를 만들 수 없으므로, 임시 controller가 먼저 `build_runtime.yml`만 실행합니다. 이후 이미지 build/push 자체는 일반 애플리케이션 이미지와 마찬가지로 `community.docker` 모듈로 수행됩니다.
+이 부트스트랩은 순환 의존을 끊기 위한 한 번의 예외입니다. Ansible 이미지가 아직 없을 때에는 Ansible로 그 이미지를 만들 수 없으므로, 임시 controller가 먼저 `setup.yml`만 실행합니다. 이후 이미지 build/push 자체는 일반 애플리케이션 이미지와 마찬가지로 `community.docker` 모듈로 수행됩니다.
 
 수동 실행은 `country`와 `deploy_env`를 반드시 받습니다. 값이 없거나 지원하지 않는 값이면 playbook의 검증 단계에서 실패합니다. 기본 권역이나 기본 환경을 workflow에 두지 않습니다.
 
@@ -92,7 +92,7 @@ health_check_path: /actuator/health
 
 ## 빌드와 배포
 
-`build_runtime.yml`은 전용 controller runtime을 GHCR에 올리고, `build.yml`은 애플리케이션 이미지를 올립니다. 두 playbook 모두 GHCR 로그인과 image build/push를 `community.docker.docker_login`, `docker_image`, `docker_image_info`로 처리합니다. 애플리케이션 build job은 Docker socket만 명시적으로 mount해 Docker Python SDK가 runner의 Docker API를 사용할 수 있게 합니다.
+`setup.yml`은 전용 controller runtime을 GHCR에 올리고, `build.yml`은 애플리케이션 이미지를 올립니다. 두 playbook 모두 GHCR 로그인과 image build/push를 `community.docker.docker_login`, `docker_image`, `docker_image_info`로 처리합니다. 애플리케이션 build job은 Docker socket만 명시적으로 mount해 Docker Python SDK가 runner의 Docker API를 사용할 수 있게 합니다.
 
 `deploy.yml`은 Environment 시크릿의 SSH 키와 known-hosts를 controller 임시 경로에 만들고, `target_servers`를 runtime inventory로 등록합니다. 각 대상 VM은 SSH로만 접근합니다. `deploy_single_server.yml`은 GHCR 로그인, 지정된 태그 pull, Docker network/container 재생성, `/actuator/health` 확인, 이전 이미지 정리를 모두 `community.docker` 모듈로 처리합니다. Docker CLI 문자열이나 Docker Remote API 포트는 사용하지 않습니다.
 

@@ -117,4 +117,4 @@ jobs:
           REGISTRY_USERNAME: validation
           REGISTRY_TOKEN: validation
           ANSIBLE_CONFIG: .github/ansible/ansible.cfg
-        run: ansible-playbook .github/ansible/playbooks/build_runtime.yml --syntax-check
+        run: ansible-playbook .github/ansible/playbooks/setup.yml --syntax-check
