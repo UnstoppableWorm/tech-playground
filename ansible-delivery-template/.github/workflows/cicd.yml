@@ -28,10 +28,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  pipeline:
-    uses: ./.github/workflows/pipeline-router.yml
+  test:
+    uses: ./.github/workflows/test.yml
+    with:
+      country: ${{ github.event.inputs.country || 'kr' }}
+      deploy_env: ${{ github.event.inputs.deploy_env || (github.ref_name == 'prd' && 'prd' || 'stg') }}
+
+  build:
+    needs: test
+    uses: ./.github/workflows/build.yml
     with:
       country: ${{ github.event.inputs.country || 'kr' }}
       deploy_env: ${{ github.event.inputs.deploy_env || (github.ref_name == 'prd' && 'prd' || 'stg') }}
       image_version: v1.${{ github.run_number }}
-    secrets: inherit
+
+  deploy:
+    needs: build
+    uses: ./.github/workflows/deploy.yml
+    with:
+      country: ${{ github.event.inputs.country || 'kr' }}
+      deploy_env: ${{ github.event.inputs.deploy_env || (github.ref_name == 'prd' && 'prd' || 'stg') }}
+      image_version: v1.${{ github.run_number }}

@@ -15,14 +15,14 @@
       }}
     dynamic_target_group: "delivery_{{ country }}_{{ deploy_env }}"
   vars_files:
-    - "{{ playbook_dir }}/../../pipeline/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}.yml"
     - "{{ playbook_dir }}/../../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
     - "{{ playbook_dir }}/../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
   pre_tasks:
     - name: Validate selected country, environment, and target servers
       ansible.builtin.assert:
         that:
-          - pipeline.country == country
+          - country in ['kr', 'eu', 'na']
+          - deploy_env in ['stg', 'prd']
           - deployment_environment.code == deploy_env
           - build_name | default('') | length > 0
           - docker_registry | default('') | length > 0
@@ -76,13 +76,14 @@
         | default(lookup('ansible.builtin.env', 'GITHUB_TOKEN'), true)
       }}
   vars_files:
-    - "{{ playbook_dir }}/../../pipeline/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}.yml"
     - "{{ playbook_dir }}/../../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
     - "{{ playbook_dir }}/../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
   pre_tasks:
     - name: Validate the deployment context and registry credentials
       ansible.builtin.assert:
         that:
+          - country in ['kr', 'eu', 'na']
+          - deploy_env in ['stg', 'prd']
           - build_name | default('') | length > 0
           - docker_registry | default('') | length > 0
           - registry_namespace | default('') | length > 0

@@ -15,14 +15,14 @@
     # Only localhost tests need a project-local temporary directory.
     ansible_remote_tmp: "{{ resolved_project_root }}/.ansible/remote_tmp"
   vars_files:
-    - "{{ playbook_dir }}/../../pipeline/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}.yml"
     - "{{ playbook_dir }}/../../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
     - "{{ playbook_dir }}/../vars/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
   pre_tasks:
     - name: Validate selected country, environment, and test command
       ansible.builtin.assert:
         that:
-          - pipeline.country == country
+          - country in ['kr', 'eu', 'na']
+          - deploy_env in ['stg', 'prd']
           - deployment_environment.code == deploy_env
           - test_stage.command is defined
           - test_stage.command | length > 0
