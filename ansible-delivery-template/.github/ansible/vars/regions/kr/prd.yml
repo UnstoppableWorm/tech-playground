@@ -1,0 +1,32 @@
+build_name: delivery-template-kr-prd
+region_param: KR
+spring_profile: "kr,prd"
+
+docker_registry: ghcr.io
+registry_namespace: unstoppableworm
+dockerfile: Dockerfile
+
+target_servers:
+  - name: kr-prd-app-1
+    host: kr-prd-app-1.example.internal
+    extra_env:
+      APM_TARGET_NAME: DELIVERY_TEMPLATE_KR_PRD_01
+  - name: kr-prd-app-2
+    host: kr-prd-app-2.example.internal
+    extra_env:
+      APM_TARGET_NAME: DELIVERY_TEMPLATE_KR_PRD_02
+
+port_mapping: "8080:8080"
+restart_policy: always
+
+extra_volumes:
+  - /var/log/delivery-template:/app/log
+
+extra_env:
+  TZ: Asia/Seoul
+  APP_REGION: kr
+  APP_BASE_URL: https://kr.example.com
+
+health_check_port: 8080
+health_check_path: /actuator/health
+stabilize_seconds: 15

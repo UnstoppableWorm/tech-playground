@@ -1,0 +1,120 @@
+name: validate-cicd-template
+
+on:
+  pull_request:
+    paths:
+      - .github/ansible/**
+      - .github/workflows/**
+      - Dockerfile
+      - pom.xml
+      - src/**
+  push:
+    branches:
+      - main
+    paths:
+      - .github/ansible/**
+      - .github/workflows/**
+      - Dockerfile
+      - pom.xml
+      - src/**
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: Validate ${{ matrix.country }}-${{ matrix.deploy_env }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        country:
+          - kr
+          - eu
+          - na
+        deploy_env:
+          - stg
+          - prd
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Validation must bootstrap independently so a broken runtime image can
+      # still be diagnosed before the delivery pipeline runs.
+      - name: Set up Python for Ansible validation
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the validation controller
+        run: python -m pip install --disable-pip-version-check ansible-core==2.17.7 docker==7.1.0 requests
+
+      - name: Install the Docker collection for validation
+        run: ansible-galaxy collection install --requirements-file .github/ansible/requirements.yml --collections-path .ansible/collections
+
+      - name: Validate inventory syntax
+        env:
+          DEPLOY_COUNTRY: ${{ matrix.country }}
+          DEPLOY_ENV: ${{ matrix.deploy_env }}
+          IMAGE_VERSION: v1.syntax-check
+          PROJECT_ROOT: ${{ github.workspace }}
+          REGISTRY_USERNAME: validation
+          REGISTRY_TOKEN: validation
+          ANSIBLE_CONFIG: .github/ansible/ansible.cfg
+        run: ansible-inventory --graph
+
+      - name: Validate test playbook syntax
+        env:
+          DEPLOY_COUNTRY: ${{ matrix.country }}
+          DEPLOY_ENV: ${{ matrix.deploy_env }}
+          PROJECT_ROOT: ${{ github.workspace }}
+          ANSIBLE_CONFIG: .github/ansible/ansible.cfg
+        run: ansible-playbook .github/ansible/playbooks/test.yml --syntax-check
+
+      - name: Validate build playbook syntax
+        env:
+          DEPLOY_COUNTRY: ${{ matrix.country }}
+          DEPLOY_ENV: ${{ matrix.deploy_env }}
+          IMAGE_VERSION: v1.syntax-check
+          PROJECT_ROOT: ${{ github.workspace }}
+          REGISTRY_USERNAME: validation
+          REGISTRY_TOKEN: validation
+          ANSIBLE_CONFIG: .github/ansible/ansible.cfg
+        run: ansible-playbook .github/ansible/playbooks/build.yml --syntax-check
+
+      - name: Validate deploy playbook syntax
+        env:
+          DEPLOY_COUNTRY: ${{ matrix.country }}
+          DEPLOY_ENV: ${{ matrix.deploy_env }}
+          IMAGE_VERSION: v1.syntax-check
+          PROJECT_ROOT: ${{ github.workspace }}
+          REGISTRY_USERNAME: validation
+          REGISTRY_TOKEN: validation
+          ANSIBLE_CONFIG: .github/ansible/ansible.cfg
+        run: ansible-playbook .github/ansible/playbooks/deploy.yml --syntax-check
+
+  runtime_syntax:
+    name: Validate controller runtime playbook
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python for runtime validation
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the validation controller
+        run: python -m pip install --disable-pip-version-check ansible-core==2.17.7 docker==7.1.0 requests
+
+      - name: Install the Docker collection for validation
+        run: ansible-galaxy collection install --requirements-file .github/ansible/requirements.yml --collections-path .ansible/collections
+
+      - name: Validate controller runtime playbook syntax
+        env:
+          PROJECT_ROOT: ${{ github.workspace }}
+          RUNTIME_IMAGE_TAG: runtime-syntax-check
+          REGISTRY_USERNAME: validation
+          REGISTRY_TOKEN: validation
+          ANSIBLE_CONFIG: .github/ansible/ansible.cfg
+        run: ansible-playbook .github/ansible/playbooks/setup.yml --syntax-check

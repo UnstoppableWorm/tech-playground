@@ -1,0 +1,149 @@
+---
+# Shared build template. Country/environment files provide build_name,
+# docker_registry, registry_namespace, dockerfile, and optional region_param.
+- name: Build and push a country-specific release image
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    country: "{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}"
+    deploy_env: "{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}"
+    image_version: "{{ lookup('ansible.builtin.env', 'IMAGE_VERSION') }}"
+    image_revision: >-
+      {{
+        lookup('ansible.builtin.env', 'IMAGE_REVISION')
+        | default(lookup('ansible.builtin.env', 'GITHUB_SHA'), true)
+        | default(lookup('ansible.builtin.env', 'IMAGE_VERSION'), true)
+      }}
+    image_source: >-
+      {{
+        lookup('ansible.builtin.env', 'GITHUB_SERVER_URL')
+        ~ '/'
+        ~ lookup('ansible.builtin.env', 'GITHUB_REPOSITORY')
+        if lookup('ansible.builtin.env', 'GITHUB_REPOSITORY') | length > 0
+        else ''
+      }}
+    registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') }}"
+    registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
+    resolved_project_root: >-
+      {{
+        lookup('ansible.builtin.env', 'PROJECT_ROOT')
+        | default(lookup('ansible.builtin.env', 'GITHUB_WORKSPACE'), true)
+        | default(playbook_dir ~ '/../../..', true)
+      }}
+    # The build runs on localhost, unlike the SSH-based deployment playbook.
+    ansible_remote_tmp: "{{ resolved_project_root }}/.ansible/remote_tmp"
+  vars_files:
+    - "{{ playbook_dir }}/../vars/environments/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
+    - "{{ playbook_dir }}/../vars/regions/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
+  pre_tasks:
+    - name: Validate selected country, environment, and image version
+      ansible.builtin.assert:
+        that:
+          - country in ['kr', 'eu', 'na']
+          - deploy_env in ['stg', 'prd']
+          - deployment_environment.code == deploy_env
+          - build_name | default('') | length > 0
+          - docker_registry | default('') | length > 0
+          - registry_namespace | default('') | length > 0
+          - dockerfile | default('Dockerfile', true) | length > 0
+          - image_version | default('') is match('^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
+          - registry_username | default('') | length > 0
+          - registry_token | default('') | length > 0
+        fail_msg: Check country, deploy environment, image version, registry settings, and registry credentials.
+  tasks:
+    - name: Resolve the immutable versioned image name
+      ansible.builtin.set_fact:
+        release_repository: "{{ docker_registry | lower }}/{{ registry_namespace | lower }}/{{ build_name | lower }}"
+        release_image: "{{ docker_registry | lower }}/{{ registry_namespace | lower }}/{{ build_name | lower }}:{{ image_version }}"
+        release_revision: "{{ image_revision | default(image_version, true) }}"
+        resolved_dockerfile_path: "{{ resolved_project_root }}/{{ dockerfile | default('Dockerfile', true) }}"
+
+    - name: Resolve Docker build metadata
+      ansible.builtin.set_fact:
+        docker_build_args: >-
+          {{
+            {'APP_VERSION': image_version}
+            | combine(
+                {'REGION_PARAMETER': region_param}
+                if region_param | default('', true) | length > 0
+                else {}
+              )
+          }}
+        docker_build_labels: >-
+          {{
+            {
+              'org.opencontainers.image.version': image_version,
+              'org.opencontainers.image.revision': release_revision
+            }
+            | combine(
+                {'org.opencontainers.image.source': image_source}
+                if image_source | default('', true) | length > 0
+                else {}
+              )
+          }}
+
+    - name: Ensure the Docker build context exists
+      ansible.builtin.stat:
+        path: "{{ resolved_dockerfile_path }}"
+      register: dockerfile_stat
+
+    - name: Stop when the Docker build context is incomplete
+      ansible.builtin.assert:
+        that:
+          - dockerfile_stat.stat.exists
+        fail_msg: "Dockerfile not found at {{ resolved_dockerfile_path }}."
+
+    - name: Verify the Docker API is available on the build runner
+      community.docker.docker_host_info:
+
+    - name: Login to the container registry from the build runner
+      community.docker.docker_login:
+        registry_url: "{{ docker_registry }}"
+        username: "{{ registry_username }}"
+        password: "{{ registry_token }}"
+        reauthorize: true
+      no_log: true
+
+    - name: Remove an existing local image with the requested version
+      community.docker.docker_image:
+        name: "{{ release_repository }}"
+        tag: "{{ image_version }}"
+        state: absent
+        force_absent: true
+
+    - name: Remove dangling local images before the build
+      community.docker.docker_prune:
+        images: true
+        images_filters:
+          dangling: true
+
+    - name: Build and push the immutable versioned image
+      community.docker.docker_image:
+        name: "{{ release_repository }}"
+        tag: "{{ image_version }}"
+        state: present
+        source: build
+        force_source: true
+        push: true
+        build:
+          path: "{{ resolved_project_root }}"
+          dockerfile: "{{ dockerfile | default('Dockerfile', true) }}"
+          pull: true
+          args: "{{ docker_build_args }}"
+          labels: "{{ docker_build_labels }}"
+
+    - name: Verify the published local image has the requested version tag
+      community.docker.docker_image_info:
+        name: "{{ release_image }}"
+      register: published_image_info
+
+    - name: Stop when the requested image tag is missing after the build
+      ansible.builtin.assert:
+        that:
+          - published_image_info.images | length == 1
+        fail_msg: "Image {{ release_image }} is missing after the build."
+
+    - name: Report the published image version
+      ansible.builtin.debug:
+        msg: "Published {{ release_image }} for {{ country }}/{{ deploy_env }}."

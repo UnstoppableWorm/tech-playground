@@ -1,0 +1,87 @@
+---
+# The first workflow job bootstraps a temporary controller, then this playbook
+# builds the reusable controller image with the same Docker modules as delivery.
+- name: Set up and publish the reusable Ansible controller runtime
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    project_root: "{{ lookup('ansible.builtin.env', 'PROJECT_ROOT') }}"
+    runtime_image_tag: "{{ lookup('ansible.builtin.env', 'RUNTIME_IMAGE_TAG') }}"
+    registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') }}"
+    registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
+    ansible_remote_tmp: "{{ lookup('ansible.builtin.env', 'PROJECT_ROOT') }}/.ansible/remote_tmp"
+  vars_files:
+    - "{{ playbook_dir }}/../vars/runtime.yml"
+  pre_tasks:
+    - name: Validate the controller runtime build settings
+      ansible.builtin.assert:
+        that:
+          - project_root | length > 0
+          - runtime_image_repository | length > 0
+          - runtime_image_source | length > 0
+          - runtime_build_context | length > 0
+          - runtime_dockerfile | length > 0
+          - runtime_image_tag is match('^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
+          - registry_username | length > 0
+          - registry_token | length > 0
+        fail_msg: Check PROJECT_ROOT, RUNTIME_IMAGE_TAG, runtime image settings, and registry credentials.
+
+    - name: Check the controller runtime Dockerfile exists
+      ansible.builtin.stat:
+        path: "{{ project_root }}/{{ runtime_build_context }}/{{ runtime_dockerfile }}"
+      register: runtime_dockerfile_stat
+
+    - name: Stop when the controller runtime Dockerfile is missing
+      ansible.builtin.assert:
+        that:
+          - runtime_dockerfile_stat.stat.exists
+          - runtime_dockerfile_stat.stat.isreg
+        fail_msg: "Controller runtime Dockerfile is missing."
+
+  tasks:
+    - name: Resolve the source-addressed controller runtime image name
+      ansible.builtin.set_fact:
+        runtime_image: "{{ runtime_image_repository }}:{{ runtime_image_tag }}"
+
+    - name: Verify the Docker API is available for controller runtime build
+      community.docker.docker_host_info:
+
+    - name: Log in to GHCR for controller runtime publishing
+      community.docker.docker_login:
+        registry_url: ghcr.io
+        username: "{{ registry_username }}"
+        password: "{{ registry_token }}"
+        reauthorize: true
+      no_log: true
+
+    - name: Build and publish the source-addressed controller runtime image
+      community.docker.docker_image:
+        name: "{{ runtime_image_repository }}"
+        tag: "{{ runtime_image_tag }}"
+        state: present
+        source: build
+        force_source: true
+        push: true
+        build:
+          path: "{{ project_root }}/{{ runtime_build_context }}"
+          dockerfile: "{{ runtime_dockerfile }}"
+          pull: true
+          labels:
+            org.opencontainers.image.source: "{{ runtime_image_source }}"
+            org.opencontainers.image.version: "{{ runtime_image_tag }}"
+
+    - name: Verify the published controller runtime tag
+      community.docker.docker_image_info:
+        name: "{{ runtime_image }}"
+      register: published_runtime_image
+
+    - name: Stop when the controller runtime tag is missing after publish
+      ansible.builtin.assert:
+        that:
+          - published_runtime_image.images | length == 1
+        fail_msg: "Controller runtime image {{ runtime_image }} is missing after publish."
+
+    - name: Report the published controller runtime image
+      ansible.builtin.debug:
+        msg: "Published reusable Ansible controller runtime {{ runtime_image }}."

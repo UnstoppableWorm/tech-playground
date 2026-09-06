@@ -1,0 +1,58 @@
+name: regional-ansible-cicd
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - stg
+      - prd
+  workflow_dispatch:
+    inputs:
+      country:
+        description: Deployment country / region
+        required: true
+        type: choice
+        options: [kr, eu, na]
+      deploy_env:
+        description: Deployment environment
+        required: true
+        type: choice
+        options: [stg, prd]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: regional-cicd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare_runtime:
+    uses: ./.github/workflows/prepare-runtime.yml
+
+  test:
+    needs: prepare_runtime
+    uses: ./.github/workflows/test.yml
+    with:
+      country: ${{ github.event.inputs.country }}
+      deploy_env: ${{ github.event.inputs.deploy_env }}
+      runtime_image: ${{ needs.prepare_runtime.outputs.runtime_image }}
+
+  build:
+    needs: [prepare_runtime, test]
+    uses: ./.github/workflows/build.yml
+    with:
+      country: ${{ github.event.inputs.country }}
+      deploy_env: ${{ github.event.inputs.deploy_env }}
+      image_version: v1.${{ github.run_number }}
+      runtime_image: ${{ needs.prepare_runtime.outputs.runtime_image }}
+
+  deploy:
+    needs: [prepare_runtime, build]
+    uses: ./.github/workflows/deploy.yml
+    with:
+      country: ${{ github.event.inputs.country }}
+      deploy_env: ${{ github.event.inputs.deploy_env }}
+      image_version: v1.${{ github.run_number }}
+      runtime_image: ${{ needs.prepare_runtime.outputs.runtime_image }}

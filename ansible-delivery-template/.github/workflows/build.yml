@@ -1,0 +1,45 @@
+name: Build stage
+
+on:
+  workflow_call:
+    inputs:
+      country:
+        required: true
+        type: string
+      deploy_env:
+        required: true
+        type: string
+      image_version:
+        required: true
+        type: string
+      runtime_image:
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build and push (${{ inputs.country }}/${{ inputs.deploy_env }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    container:
+      image: ${{ inputs.runtime_image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    env:
+      ANSIBLE_FORCE_COLOR: "true"
+      PY_COLORS: "1"
+      ANSIBLE_CONFIG: .github/ansible/ansible.cfg
+      DEPLOY_COUNTRY: ${{ inputs.country }}
+      DEPLOY_ENV: ${{ inputs.deploy_env }}
+      IMAGE_VERSION: ${{ inputs.image_version }}
+      REGISTRY_USERNAME: ${{ github.actor }}
+      REGISTRY_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish the configured image
+        run: ansible-playbook .github/ansible/playbooks/build.yml

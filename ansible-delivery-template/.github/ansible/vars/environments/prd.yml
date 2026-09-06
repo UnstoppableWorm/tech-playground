@@ -1,0 +1,12 @@
+deployment_ssh:
+  user: deploy
+  port: 22
+
+deployment_environment:
+  code: prd
+  deploy_serial: 1
+  remove_previous_image: true
+  docker_image_prune: true
+  runtime_env:
+    APP_RUNTIME_MODE: production
+    LOG_LEVEL: INFO
