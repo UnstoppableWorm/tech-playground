@@ -7,6 +7,12 @@ services:
       - "{{ runtime_env_file_path }}"
     ports:
       - "{{ target.host_port }}:{{ target.container_port }}"
+{% if resolved_extra_volumes | default([]) | length > 0 %}
+    volumes:
+{% for volume in resolved_extra_volumes %}
+      - "{{ volume }}"
+{% endfor %}
+{% endif %}
     labels:
       deployment.country: "{{ country }}"
       deployment.environment: "{{ deploy_env }}"

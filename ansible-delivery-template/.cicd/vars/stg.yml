@@ -18,6 +18,7 @@ test_stage:
 deployment_environment:
   code: stg
   deploy_serial: "100%"
+  stabilize_seconds: 0
   remove_previous_image: true
   docker_image_prune: false
   runtime_env:

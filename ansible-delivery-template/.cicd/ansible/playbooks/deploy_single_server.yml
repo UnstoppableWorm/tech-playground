@@ -1,0 +1,207 @@
+---
+# Included by deploy.yml once for every VM in the selected target group.
+- name: Announce the requested image for the current target
+  ansible.builtin.debug:
+    msg: "Deploying {{ release_image }} to {{ country }}/{{ deploy_env }} on {{ inventory_hostname }}."
+
+- name: Verify Docker is available on the target VM
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  changed_when: false
+
+- name: Login to the container registry from the target VM
+  ansible.builtin.command:
+    argv:
+      - docker
+      - login
+      - "{{ container_registry.host }}"
+      - --username
+      - "{{ registry_username }}"
+      - --password-stdin
+  stdin: "{{ registry_token }}"
+  no_log: true
+  changed_when: true
+
+- name: Pull the requested immutable image version
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - pull
+      - "{{ release_image }}"
+  changed_when: true
+
+- name: Read the pulled image ID
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - --format
+      - "{{ '{{' }}.Id{{ '}}' }}"
+      - "{{ release_image }}"
+  register: requested_image
+  changed_when: false
+
+- name: Read the image ID used by the current target container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - container
+      - inspect
+      - --format
+      - "{{ '{{' }}.Image{{ '}}' }}"
+      - "{{ deployed_container_name }}"
+  register: current_target_image
+  failed_when: false
+  changed_when: false
+
+- name: Detect Docker Compose v2 plugin
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - version
+  register: compose_v2
+  failed_when: false
+  changed_when: false
+
+- name: Detect legacy docker-compose binary when needed
+  ansible.builtin.command:
+    argv:
+      - docker-compose
+      - version
+  register: compose_v1
+  when: compose_v2.rc != 0
+  failed_when: false
+  changed_when: false
+
+- name: Require a supported Compose command
+  ansible.builtin.assert:
+    that:
+      - compose_v2.rc == 0 or (compose_v1.rc | default(1)) == 0
+    fail_msg: Install either the Docker Compose v2 plugin or the docker-compose binary on this VM.
+
+- name: Select the Compose command supported by this VM
+  ansible.builtin.set_fact:
+    compose_command_argv: "{{ ['docker', 'compose'] if compose_v2.rc == 0 else ['docker-compose'] }}"
+
+- name: Ensure deployment directory exists
+  ansible.builtin.file:
+    path: "{{ deployment_root }}"
+    state: directory
+    mode: "0755"
+
+- name: Merge country, environment, and server runtime values
+  ansible.builtin.set_fact:
+    merged_runtime_env: >-
+      {{
+        {
+          'APP_NAME': release.app_name,
+          'APP_COUNTRY': country,
+          'APP_ENV': deploy_env,
+          'IMAGE_VERSION': image_version,
+          'RELEASE_IMAGE': release_image
+        }
+        | combine(deployment_environment.runtime_env | default({}))
+        | combine(release.runtime_env | default({}))
+        | combine(target.runtime_env | default({}))
+        | combine(hostvars[inventory_hostname].runtime_env | default({}))
+      }}
+    resolved_extra_volumes: >-
+      {{
+        (target.extra_volumes | default([]))
+        + (hostvars[inventory_hostname].extra_volumes | default([]))
+      }}
+
+- name: Render the version-pinned Compose manifest
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/docker-compose.yml.j2"
+    dest: "{{ compose_file_path }}"
+    mode: "0644"
+
+- name: Render runtime environment values
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/app.env.j2"
+    dest: "{{ runtime_env_file_path }}"
+    mode: "0644"
+
+- name: Recreate the service with the requested image version
+  ansible.builtin.command:
+    argv: >-
+      {{
+        compose_command_argv
+        + [
+          '--project-name', compose_project_name,
+          '--file', compose_file_path,
+          'up', '--detach', '--force-recreate', '--remove-orphans'
+        ]
+      }}
+  args:
+    chdir: "{{ deployment_root }}"
+  changed_when: true
+
+- name: Wait for the recreated service port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ target.host_port }}"
+    state: started
+    delay: 2
+    timeout: 120
+
+- name: Wait for the new release health endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ target.host_port }}{{ target.healthcheck_path }}"
+    method: GET
+    status_code: 200
+  register: deployment_healthcheck
+  retries: 18
+  delay: 5
+  until: deployment_healthcheck.status == 200
+
+- name: Remove the previous target image after the new release is healthy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - rm
+      - "{{ current_target_image.stdout | trim }}"
+  register: previous_image_removal
+  when:
+    - deployment_environment.remove_previous_image | bool
+    - current_target_image.rc == 0
+    - (current_target_image.stdout | trim) != (requested_image.stdout | trim)
+  failed_when: false
+  changed_when: previous_image_removal.rc == 0
+
+- name: Keep a shared previous image when another container still uses it
+  ansible.builtin.debug:
+    msg: "Previous image {{ current_target_image.stdout | trim }} is still in use and was not force-removed."
+  when:
+    - previous_image_removal is defined
+    - (previous_image_removal.rc | default(0)) != 0
+
+- name: Prune stale dangling images according to environment policy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - prune
+      - --force
+      - --filter
+      - until=168h
+  when: deployment_environment.docker_image_prune | bool
+  changed_when: true
+
+- name: Stabilize before the next production target
+  ansible.builtin.pause:
+    seconds: "{{ deployment_environment.stabilize_seconds | default(0) | int }}"
+  when:
+    - deployment_environment.stabilize_seconds | default(0) | int > 0
+    - inventory_hostname != (ansible_play_hosts_all | last)
+
+- name: Report the deployed image version
+  ansible.builtin.debug:
+    msg: "Deployed {{ release_image }} to {{ country }}/{{ deploy_env }} on {{ inventory_hostname }}."

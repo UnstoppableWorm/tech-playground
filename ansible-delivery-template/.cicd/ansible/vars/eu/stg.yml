@@ -6,10 +6,15 @@ target:
   container_port: 80
   restart_policy: unless-stopped
   healthcheck_path: /
+  extra_volumes: []
+  runtime_env: {}
 
 release:
   app_name: delivery-template-app
   image_name: delivery-template-app
+  dockerfile: Dockerfile
+  build_args:
+    REGION_PARAMETER: eu
   runtime_env:
     TZ: Europe/Berlin
     APP_REGION: eu

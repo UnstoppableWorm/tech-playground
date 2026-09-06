@@ -29,7 +29,7 @@
         release_repository: "{{ container_registry.host | lower }}/{{ container_registry.namespace | lower }}/{{ release.image_name | lower }}"
         release_image: "{{ container_registry.host | lower }}/{{ container_registry.namespace | lower }}/{{ release.image_name | lower }}:{{ image_version }}"
         release_revision: "{{ image_revision | default(image_version, true) }}"
-        resolved_dockerfile_path: "{{ resolved_project_root }}/Dockerfile"
+        resolved_dockerfile_path: "{{ resolved_project_root }}/{{ release.dockerfile | default('Dockerfile', true) }}"
 
     - name: Ensure the Docker build context exists
       ansible.builtin.stat:
@@ -62,9 +62,33 @@
       no_log: true
       changed_when: true
 
-    - name: Build the immutable versioned image
+    - name: Remove an existing local image with the requested version
       ansible.builtin.command:
         argv:
+          - docker
+          - image
+          - rm
+          - --force
+          - "{{ release_image }}"
+      register: requested_local_image_cleanup
+      failed_when: false
+      changed_when: requested_local_image_cleanup.rc == 0
+
+    - name: Remove dangling local images before the build
+      ansible.builtin.command:
+        argv:
+          - docker
+          - image
+          - prune
+          - --force
+          - --filter
+          - dangling=true
+      register: dangling_local_image_prune
+      changed_when: "'Deleted Images:' in dangling_local_image_prune.stdout"
+
+    - name: Initialize the versioned Docker build command
+      ansible.builtin.set_fact:
+        docker_build_argv:
           - docker
           - build
           - --pull
@@ -76,11 +100,39 @@
           - "org.opencontainers.image.version={{ image_version }}"
           - --label
           - "org.opencontainers.image.revision={{ release_revision }}"
-          - --label
-          - "org.opencontainers.image.source={{ image_source | default('', true) }}"
           - --build-arg
           - "APP_VERSION={{ image_version }}"
-          - "{{ resolved_project_root }}"
+
+    - name: Add the source repository label when available
+      ansible.builtin.set_fact:
+        docker_build_argv: >-
+          {{
+            docker_build_argv
+            + [
+                '--label',
+                'org.opencontainers.image.source=' ~ (image_source | default('', true))
+              ]
+          }}
+      when: image_source | default('', true) | length > 0
+
+    - name: Add country-specific Docker build arguments
+      ansible.builtin.set_fact:
+        docker_build_argv: >-
+          {{
+            docker_build_argv
+            + ['--build-arg', item.key ~ '=' ~ (item.value | string)]
+          }}
+      loop: "{{ release.build_args | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Add the Docker build context
+      ansible.builtin.set_fact:
+        docker_build_argv: "{{ docker_build_argv + [resolved_project_root] }}"
+
+    - name: Build the immutable versioned image
+      ansible.builtin.command:
+        argv: "{{ docker_build_argv }}"
       changed_when: true
 
     - name: Verify the local image has the requested version tag
