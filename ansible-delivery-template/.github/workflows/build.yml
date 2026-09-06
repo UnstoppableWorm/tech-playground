@@ -12,6 +12,9 @@ on:
       image_version:
         required: true
         type: string
+      runtime_image:
+        required: true
+        type: string
 
 jobs:
   build:
@@ -20,6 +23,13 @@ jobs:
     permissions:
       contents: read
       packages: write
+    container:
+      image: ${{ inputs.runtime_image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
     env:
       ANSIBLE_FORCE_COLOR: "true"
       PY_COLORS: "1"
@@ -31,6 +41,5 @@ jobs:
       REGISTRY_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-ansible
       - name: Build and publish the configured image
         run: ansible-playbook .github/ansible/playbooks/build.yml

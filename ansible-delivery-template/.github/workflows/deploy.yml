@@ -12,6 +12,9 @@ on:
       image_version:
         required: true
         type: string
+      runtime_image:
+        required: true
+        type: string
 
 jobs:
   deploy:
@@ -20,11 +23,15 @@ jobs:
     permissions:
       contents: read
       packages: read
+    container:
+      image: ${{ inputs.runtime_image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
     environment:
       name: ${{ inputs.country }}-${{ inputs.deploy_env }}
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-ansible
       - name: Deploy the requested image version
         env:
           ANSIBLE_FORCE_COLOR: "true"

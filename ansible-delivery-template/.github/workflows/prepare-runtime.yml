@@ -1,0 +1,41 @@
+name: Prepare Ansible delivery runtime
+
+on:
+  workflow_call:
+    outputs:
+      runtime_image:
+        description: Source-addressed GHCR image used by the delivery jobs.
+        value: ${{ jobs.prepare.outputs.runtime_image }}
+
+jobs:
+  prepare:
+    name: Build Ansible controller runtime
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      runtime_image: ghcr.io/unstoppableworm/ansible-delivery-runtime:runtime-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # This is the one bootstrap exception: Ansible must exist before it can
+      # build the reusable Ansible image used by every following job.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the temporary bootstrap controller
+        run: python -m pip install --disable-pip-version-check ansible-core==2.17.7 docker==7.1.0 requests
+
+      - name: Install the Docker collection for the bootstrap controller
+        run: ansible-galaxy collection install --requirements-file .github/ansible/requirements.yml --collections-path .ansible/collections
+
+      - name: Build and publish the reusable controller runtime
+        env:
+          ANSIBLE_CONFIG: .github/ansible/ansible.cfg
+          PROJECT_ROOT: ${{ github.workspace }}
+          RUNTIME_IMAGE_TAG: runtime-${{ github.sha }}
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: ansible-playbook .github/ansible/playbooks/build_runtime.yml

@@ -9,6 +9,9 @@ on:
       deploy_env:
         required: true
         type: string
+      runtime_image:
+        required: true
+        type: string
 
 jobs:
   test:
@@ -16,6 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
+    container:
+      image: ${{ inputs.runtime_image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
     env:
       ANSIBLE_FORCE_COLOR: "true"
       PY_COLORS: "1"
@@ -24,6 +33,5 @@ jobs:
       DEPLOY_ENV: ${{ inputs.deploy_env }}
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-ansible
       - name: Run configured tests
         run: ansible-playbook .github/ansible/playbooks/test.yml

@@ -28,24 +28,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare_runtime:
+    uses: ./.github/workflows/prepare-runtime.yml
+
   test:
+    needs: prepare_runtime
     uses: ./.github/workflows/test.yml
     with:
       country: ${{ github.event.inputs.country }}
       deploy_env: ${{ github.event.inputs.deploy_env }}
+      runtime_image: ${{ needs.prepare_runtime.outputs.runtime_image }}
 
   build:
-    needs: test
+    needs: [prepare_runtime, test]
     uses: ./.github/workflows/build.yml
     with:
       country: ${{ github.event.inputs.country }}
       deploy_env: ${{ github.event.inputs.deploy_env }}
       image_version: v1.${{ github.run_number }}
+      runtime_image: ${{ needs.prepare_runtime.outputs.runtime_image }}
 
   deploy:
-    needs: build
+    needs: [prepare_runtime, build]
     uses: ./.github/workflows/deploy.yml
     with:
       country: ${{ github.event.inputs.country }}
       deploy_env: ${{ github.event.inputs.deploy_env }}
       image_version: v1.${{ github.run_number }}
+      runtime_image: ${{ needs.prepare_runtime.outputs.runtime_image }}
