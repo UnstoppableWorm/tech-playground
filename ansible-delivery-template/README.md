@@ -2,7 +2,7 @@
 
 신규 클라우드 환경으로 VM을 이관할 때, GitLab CI 안에 섞여 있던 권역별·환경별 설정과 반복 배포 스테이지를 분리한 GitHub Actions 템플릿입니다.
 
-GitHub Actions는 수동 실행, runner 선택, GitHub Container Registry(GHCR) 인증만 담당합니다. 테스트, 이미지 버저닝, 이미지 빌드와 push, VM 접속, 지정 버전 pull, 기존 이미지 정리, Compose 배포는 Ansible 플레이북으로 고정해 여러 애플리케이션이 같은 절차를 재사용합니다.
+GitHub Actions는 브랜치 규칙 또는 수동 실행, runner 선택, GitHub Container Registry(GHCR) 인증을 담당합니다. 테스트, 이미지 버저닝, 이미지 빌드와 push, VM 접속, 지정 버전 pull, 기존 이미지 정리, Compose 배포는 Ansible 플레이북으로 고정해 여러 애플리케이션이 같은 절차를 재사용합니다.
 
 이 디렉터리는 현재 워크스페이스의 하위 프로젝트입니다. 별도 저장소로 분리하면 아래 구조가 저장소 루트 기준으로 그대로 동작합니다.
 
@@ -89,7 +89,16 @@ stabilize_seconds: 15
 
 ## GitHub Actions 흐름
 
-`workflow_dispatch`에서 `country`, `deploy_env`, `release_mode`, `image_version`을 선택하면 다음 변수 파일이 함께 주입됩니다.
+사진의 GitLab `workflow.rules`와 환경별 `include`는 GitHub Actions의 `push` trigger와 `resolve` job으로 대응합니다. 자동 실행은 원본 KR 파이프라인과 같은 기준으로 연결합니다.
+
+| GitHub 이벤트 | 선택 결과 | 실행 흐름 |
+| --- | --- | --- |
+| `push` to `feature/**` | `kr`, `stg`, `build_and_deploy` | test -> build -> deploy |
+| `push` to `stg` | `kr`, `stg`, `build_and_deploy` | test -> build -> deploy |
+| `push` to `prd` | `kr`, `prd`, `build_and_deploy` | test -> build -> deploy |
+| `workflow_dispatch` | 선택한 country/environment/mode | 선택한 흐름 |
+
+`workflow_dispatch`에서는 `country`, `deploy_env`, `release_mode`, `image_version`을 선택하면 다음 변수 파일이 함께 주입됩니다. EU와 NA, 또는 브랜치 규칙과 다른 조합은 이 수동 실행으로 배포합니다.
 
 ~~~text
 kr + stg
@@ -103,6 +112,8 @@ kr + stg
 ~~~
 
 `build_and_deploy` 모드에서는 `test -> build -> deploy` 순서로 실행합니다. 테스트가 실패하면 빌드는 시작하지 않습니다. `deploy_only` 모드는 기존 GHCR 이미지 버전만 pull하여 배포하므로 테스트와 빌드를 건너뜁니다. 이 모드에서는 pull할 기존 `image_version`을 반드시 입력해야 합니다.
+
+브랜치 push는 자동으로 `build_and_deploy`를 선택합니다. `prd` Environment에는 required reviewer 또는 deployment protection rule을 설정해 운영 배포가 승인 후에만 진행되도록 구성하는 것을 권장합니다.
 
 `resolve` job은 `image_version`을 한 번 결정해 출력합니다. 입력하지 않으면 `v1.<GitHub run number>`을 사용하므로, GitLab의 `build.env` dotenv artifact처럼 build와 deploy가 같은 불변 태그를 공유합니다.
 
