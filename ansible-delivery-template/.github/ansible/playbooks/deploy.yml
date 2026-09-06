@@ -16,12 +16,20 @@
     dynamic_target_group: "delivery_{{ country }}_{{ deploy_env }}"
     deployment_ssh_private_key: "{{ lookup('ansible.builtin.env', 'SSH_PRIVATE_KEY') }}"
     deployment_ssh_known_hosts: "{{ lookup('ansible.builtin.env', 'SSH_KNOWN_HOSTS') }}"
+    controller_project_root: >-
+      {{
+        lookup('ansible.builtin.env', 'PROJECT_ROOT')
+        | default(lookup('ansible.builtin.env', 'GITHUB_WORKSPACE'), true)
+        | default(playbook_dir ~ '/../../..', true)
+      }}
     controller_runtime_dir: >-
       {{
         lookup('ansible.builtin.env', 'RUNNER_TEMP')
         | default(lookup('ansible.builtin.env', 'TMPDIR'), true)
         | default('/tmp', true)
       }}
+    # Only controller tasks use this path; target VMs keep their own remote_tmp.
+    ansible_remote_tmp: "{{ controller_project_root }}/.ansible/remote_tmp"
   vars_files:
     - "{{ playbook_dir }}/../vars/environments/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
     - "{{ playbook_dir }}/../vars/regions/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
@@ -154,6 +162,8 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  vars:
+    ansible_remote_tmp: "{{ playbook_dir }}/../../../.ansible/remote_tmp"
   tasks:
     - name: Remove the temporary deployment SSH directory
       ansible.builtin.file:

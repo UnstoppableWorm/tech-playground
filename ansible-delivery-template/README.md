@@ -13,7 +13,7 @@ GitHub와 연결된 자동화 자산은 모두 `.github` 아래에 둡니다. [c
 │   │   └── setup-ansible/action.yml
 │   ├── ansible/
 │   │   ├── ansible.cfg
-│   │   ├── inventory/hosts.yml
+│   │   ├── hosts.yml                      # controller only; targets are added at runtime
 │   │   ├── playbooks/                    # 모든 국가/환경에서 재사용
 │   │   │   ├── test.yml
 │   │   │   ├── build.yml
