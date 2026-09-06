@@ -2,15 +2,6 @@ deployment_ssh:
   user: deploy
   port: 22
 
-test_stage:
-  command:
-    - sh
-    - -ec
-    - |
-      test -f Dockerfile
-      test -f static/index.html
-      grep -q "GitHub Actions + Ansible Delivery" static/index.html
-
 deployment_environment:
   code: stg
   deploy_serial: 1

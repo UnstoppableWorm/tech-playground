@@ -1,5 +1,7 @@
 ---
-- name: Run tests before building a country-specific release
+# This stage deliberately uses argv-based commands rather than a shell script.
+# Maven owns unit tests; the packaged JAR owns the executable smoke test.
+- name: Test the Java service before building a country-specific release
   hosts: localhost
   connection: local
   gather_facts: false
@@ -18,19 +20,70 @@
     - "{{ playbook_dir }}/../vars/environments/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
     - "{{ playbook_dir }}/../vars/regions/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
   pre_tasks:
-    - name: Validate selected country, environment, and test command
+    - name: Validate selected country, environment, and Java project files
       ansible.builtin.assert:
         that:
           - country in ['kr', 'eu', 'na']
           - deploy_env in ['stg', 'prd']
           - deployment_environment.code == deploy_env
-          - test_stage.command is defined
-          - test_stage.command | length > 0
-        fail_msg: Check country, deploy environment, and test_stage.command.
+        fail_msg: Check the selected country and deployment environment.
+
+    - name: Check the Maven project descriptor exists
+      ansible.builtin.stat:
+        path: "{{ resolved_project_root }}/pom.xml"
+      register: pom_file
+
+    - name: Stop when the Java project descriptor is missing
+      ansible.builtin.assert:
+        that:
+          - pom_file.stat.exists
+          - pom_file.stat.isreg
+        fail_msg: "pom.xml is required at {{ resolved_project_root }}."
   tasks:
-    - name: Run the configured project test command
+    - name: Run Java unit tests with Maven
       ansible.builtin.command:
-        argv: "{{ test_stage.command }}"
+        argv:
+          - mvn
+          - --batch-mode
+          - --no-transfer-progress
+          - test
+      args:
+        chdir: "{{ resolved_project_root }}"
+      changed_when: false
+
+    - name: Package the tested Java service as an executable JAR
+      ansible.builtin.command:
+        argv:
+          - mvn
+          - --batch-mode
+          - --no-transfer-progress
+          - -DskipTests
+          - package
+      args:
+        chdir: "{{ resolved_project_root }}"
+      changed_when: false
+
+    - name: Find the packaged Java service
+      ansible.builtin.find:
+        paths: "{{ resolved_project_root }}/target"
+        patterns: delivery-service.jar
+        file_type: file
+        recurse: false
+      register: packaged_service
+
+    - name: Stop when Maven did not create the executable JAR
+      ansible.builtin.assert:
+        that:
+          - packaged_service.matched | int == 1
+        fail_msg: "Expected exactly one target/delivery-service.jar after packaging."
+
+    - name: Run the packaged service health smoke test
+      ansible.builtin.command:
+        argv:
+          - java
+          - -jar
+          - "{{ packaged_service.files[0].path }}"
+          - --smoke-test
       args:
         chdir: "{{ resolved_project_root }}"
       environment:

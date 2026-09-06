@@ -15,7 +15,7 @@ target_servers:
     extra_env:
       APM_TARGET_NAME: DELIVERY_TEMPLATE_EU_PRD_02
 
-port_mapping: "8080:80"
+port_mapping: "8080:8080"
 restart_policy: always
 
 extra_volumes:
@@ -27,5 +27,5 @@ extra_env:
   APP_BASE_URL: https://eu.example.com
 
 health_check_port: 8080
-health_check_path: /
+health_check_path: /actuator/health
 stabilize_seconds: 15

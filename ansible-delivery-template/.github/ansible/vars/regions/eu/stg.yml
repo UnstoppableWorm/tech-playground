@@ -11,7 +11,7 @@ target_servers:
     extra_env:
       APM_TARGET_NAME: DELIVERY_TEMPLATE_EU_STG_01
 
-port_mapping: "18080:80"
+port_mapping: "18080:8080"
 restart_policy: unless-stopped
 
 extra_volumes:
@@ -23,5 +23,5 @@ extra_env:
   APP_BASE_URL: https://stg-eu.example.com
 
 health_check_port: 18080
-health_check_path: /
+health_check_path: /actuator/health
 stabilize_seconds: 0

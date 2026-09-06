@@ -1,9 +1,14 @@
-name: Setup Ansible
-description: Install the pinned Ansible runtime after the caller checks out the repository.
+name: Setup Java and Ansible
+description: Install the Java and Ansible runtimes after the caller checks out the repository.
 
 runs:
   using: composite
   steps:
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "21"
+        cache: maven
     - uses: actions/setup-python@v5
       with:
         python-version: "3.12"
