@@ -1,0 +1,5 @@
+[mcp_servers.velog]
+command = "/opt/homebrew/bin/node"
+args = ["/Users/unstoppableworm/IdeaProjects/velog/dist/index.js"]
+required = true
+default_tools_approval_mode = "writes"
