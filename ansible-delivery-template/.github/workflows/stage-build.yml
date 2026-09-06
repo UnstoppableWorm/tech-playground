@@ -1,0 +1,35 @@
+name: Build stage
+
+on:
+  workflow_call:
+    inputs:
+      country:
+        required: true
+        type: string
+      deploy_env:
+        required: true
+        type: string
+      image_version:
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build and push (${{ inputs.country }}/${{ inputs.deploy_env }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      ANSIBLE_FORCE_COLOR: "true"
+      PY_COLORS: "1"
+      ANSIBLE_CONFIG: .cicd/ansible/ansible.cfg
+      DEPLOY_COUNTRY: ${{ inputs.country }}
+      DEPLOY_ENV: ${{ inputs.deploy_env }}
+      IMAGE_VERSION: ${{ inputs.image_version }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ansible
+      - name: Build and publish the configured image
+        run: ansible-playbook .cicd/ansible/playbooks/build.yml

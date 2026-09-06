@@ -1,0 +1,37 @@
+name: Common delivery pipeline
+
+on:
+  workflow_call:
+    inputs:
+      country:
+        required: true
+        type: string
+      deploy_env:
+        required: true
+        type: string
+      image_version:
+        required: true
+        type: string
+
+jobs:
+  test:
+    uses: ./.github/workflows/stage-test.yml
+    with:
+      country: ${{ inputs.country }}
+      deploy_env: ${{ inputs.deploy_env }}
+
+  build:
+    needs: test
+    uses: ./.github/workflows/stage-build.yml
+    with:
+      country: ${{ inputs.country }}
+      deploy_env: ${{ inputs.deploy_env }}
+      image_version: ${{ inputs.image_version }}
+
+  deploy:
+    needs: build
+    uses: ./.github/workflows/stage-deploy.yml
+    with:
+      country: ${{ inputs.country }}
+      deploy_env: ${{ inputs.deploy_env }}
+      image_version: ${{ inputs.image_version }}
