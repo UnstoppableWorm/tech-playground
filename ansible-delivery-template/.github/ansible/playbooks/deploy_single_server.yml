@@ -5,106 +5,53 @@
   ansible.builtin.debug:
     msg: "Deploying {{ release_image }} to {{ country }}/{{ deploy_env }} on {{ deployment_target_name }}."
 
-- name: Verify Docker is available on the target VM
-  ansible.builtin.command:
-    argv:
-      - docker
-      - version
-  changed_when: false
+- name: Verify the Docker API is available on the target VM
+  community.docker.docker_host_info:
 
 - name: Login to the container registry from the target VM
-  ansible.builtin.command:
-    argv:
-      - docker
-      - login
-      - "{{ docker_registry }}"
-      - --username
-      - "{{ registry_username }}"
-      - --password-stdin
-    stdin: "{{ registry_token }}"
+  community.docker.docker_login:
+    registry_url: "{{ docker_registry }}"
+    username: "{{ registry_username }}"
+    password: "{{ registry_token }}"
+    reauthorize: true
   no_log: true
-  changed_when: true
 
 - name: Pull the requested immutable image version
-  ansible.builtin.command:
-    argv:
-      - docker
-      - image
-      - pull
-      - "{{ release_image }}"
-  changed_when: true
+  community.docker.docker_image:
+    name: "{{ release_image }}"
+    state: present
+    source: pull
+    force_source: true
 
 - name: Read the pulled image ID
-  ansible.builtin.command:
-    argv:
-      - docker
-      - image
-      - inspect
-      - --format
-      - "{{ '{{' }}.Id{{ '}}' }}"
-      - "{{ release_image }}"
+  community.docker.docker_image_info:
+    name: "{{ release_image }}"
   register: requested_image
-  changed_when: false
 
-- name: Read the image ID used by the current target container
-  ansible.builtin.command:
-    argv:
-      - docker
-      - container
-      - inspect
-      - --format
-      - "{{ '{{' }}.Image{{ '}}' }}"
-      - "{{ deployed_container_name }}"
-  register: current_target_image
-  failed_when: false
-  changed_when: false
-
-- name: Detect Docker Compose v2 plugin
-  ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - version
-  register: compose_v2
-  failed_when: false
-  changed_when: false
-
-- name: Detect legacy docker-compose binary when needed
-  ansible.builtin.command:
-    argv:
-      - docker-compose
-      - version
-  register: compose_v1
-  when: compose_v2.rc != 0
-  failed_when: false
-  changed_when: false
-
-- name: Require a supported Compose command
+- name: Stop when the requested image is not available on the target
   ansible.builtin.assert:
     that:
-      - compose_v2.rc == 0 or (compose_v1.rc | default(1)) == 0
-    fail_msg: Install either the Docker Compose v2 plugin or the docker-compose binary on this VM.
+      - requested_image.images | length == 1
+    fail_msg: "Image {{ release_image }} is missing after the pull."
 
-- name: Select the Compose command supported by this VM
-  ansible.builtin.set_fact:
-    compose_command_argv: "{{ ['docker', 'compose'] if compose_v2.rc == 0 else ['docker-compose'] }}"
-
-- name: Ensure deployment directory exists
-  ansible.builtin.file:
-    path: "{{ deployment_root_path }}"
-    state: directory
-    mode: "0755"
+- name: Read the image ID used by the current target container
+  community.docker.docker_container_info:
+    name: "{{ deployed_container_name }}"
+  register: current_target_container
 
 - name: Merge country, environment, and server runtime values
   ansible.builtin.set_fact:
-    merged_runtime_env: >-
+    runtime_container_env: >-
       {{
         {
+          'DEPLOYMENT_TARGET': deployment_target_name,
+          'DEPLOYMENT_COUNTRY': country,
+          'DEPLOYMENT_ENVIRONMENT': deploy_env,
+          'RELEASE_IMAGE': release_image,
+          'IMAGE_VERSION': image_version,
           'APP_NAME': build_name,
           'APP_COUNTRY': country,
           'APP_ENV': deploy_env,
-          'IMAGE_VERSION': image_version,
-          'RELEASE_IMAGE': release_image,
           'SPRING_PROFILES_ACTIVE': spring_profile
         }
         | combine(deployment_environment.runtime_env | default({}))
@@ -117,32 +64,32 @@
         + (server_extra_volumes | default([]))
       }}
 
-- name: Render the version-pinned Compose manifest
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/docker-compose.yml.j2"
-    dest: "{{ compose_file_path }}"
-    mode: "0644"
-
-- name: Render runtime environment values
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/app.env.j2"
-    dest: "{{ runtime_env_file_path }}"
-    mode: "0644"
+- name: Ensure the service network exists
+  community.docker.docker_network:
+    name: "{{ deployment_network_name }}"
+    state: present
 
 - name: Recreate the service with the requested image version
-  ansible.builtin.command:
-    argv: >-
-      {{
-        compose_command_argv
-        + [
-          '--project-name', compose_project_name,
-          '--file', compose_file_path,
-          'up', '--detach', '--force-recreate', '--remove-orphans'
-        ]
-      }}
-  args:
-    chdir: "{{ deployment_root_path }}"
-  changed_when: true
+  community.docker.docker_container:
+    name: "{{ deployed_container_name }}"
+    image: "{{ release_image }}"
+    state: started
+    detach: true
+    recreate: true
+    pull: never
+    restart_policy: "{{ restart_policy }}"
+    env: "{{ runtime_container_env }}"
+    published_ports:
+      - "{{ port_mapping }}"
+    volumes: "{{ resolved_extra_volumes }}"
+    labels:
+      deployment.country: "{{ country }}"
+      deployment.environment: "{{ deploy_env }}"
+      deployment.target: "{{ deployment_target_name }}"
+      deployment.image-version: "{{ image_version }}"
+    networks:
+      - name: "{{ deployment_network_name }}"
+    networks_cli_compatible: true
 
 - name: Wait for the recreated service port
   ansible.builtin.wait_for:
@@ -163,38 +110,23 @@
   until: deployment_healthcheck.status == 200
 
 - name: Remove the previous target image after the new release is healthy
-  ansible.builtin.command:
-    argv:
-      - docker
-      - image
-      - rm
-      - "{{ current_target_image.stdout | trim }}"
+  community.docker.docker_image:
+    name: "{{ current_target_container.container.Image }}"
+    state: absent
   register: previous_image_removal
+  failed_when: false
   when:
     - deployment_environment.remove_previous_image | bool
-    - current_target_image.rc == 0
-    - (current_target_image.stdout | trim) != (requested_image.stdout | trim)
-  failed_when: false
-  changed_when: previous_image_removal.rc == 0
-
-- name: Keep a shared previous image when another container still uses it
-  ansible.builtin.debug:
-    msg: "Previous image {{ current_target_image.stdout | trim }} is still in use and was not force-removed."
-  when:
-    - previous_image_removal is defined
-    - (previous_image_removal.rc | default(0)) != 0
+    - current_target_container.exists
+    - current_target_container.container.Image != requested_image.images[0].Id
 
 - name: Prune stale dangling images according to environment policy
-  ansible.builtin.command:
-    argv:
-      - docker
-      - image
-      - prune
-      - --force
-      - --filter
-      - until=168h
+  community.docker.docker_prune:
+    images: true
+    images_filters:
+      dangling: true
+      until: 168h
   when: deployment_environment.docker_image_prune | bool
-  changed_when: true
 
 - name: Stabilize before the next target server
   ansible.builtin.pause:

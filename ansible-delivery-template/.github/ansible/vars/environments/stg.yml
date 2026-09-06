@@ -1,5 +1,3 @@
-project_name: delivery-template-stg
-
 deployment_ssh:
   user: deploy
   port: 22

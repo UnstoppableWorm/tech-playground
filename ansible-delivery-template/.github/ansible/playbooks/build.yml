@@ -72,6 +72,30 @@
         release_revision: "{{ image_revision | default(image_version, true) }}"
         resolved_dockerfile_path: "{{ resolved_project_root }}/{{ dockerfile | default('Dockerfile', true) }}"
 
+    - name: Resolve Docker build metadata
+      ansible.builtin.set_fact:
+        docker_build_args: >-
+          {{
+            {'APP_VERSION': image_version}
+            | combine(
+                {'REGION_PARAMETER': region_param}
+                if region_param | default('', true) | length > 0
+                else {}
+              )
+          }}
+        docker_build_labels: >-
+          {{
+            {
+              'org.opencontainers.image.version': image_version,
+              'org.opencontainers.image.revision': release_revision
+            }
+            | combine(
+                {'org.opencontainers.image.source': image_source}
+                if image_source | default('', true) | length > 0
+                else {}
+              )
+          }}
+
     - name: Ensure the Docker build context exists
       ansible.builtin.stat:
         path: "{{ resolved_dockerfile_path }}"
@@ -83,110 +107,55 @@
           - dockerfile_stat.stat.exists
         fail_msg: "Dockerfile not found at {{ resolved_dockerfile_path }}."
 
-    - name: Verify Docker is available on the build runner
-      ansible.builtin.command:
-        argv:
-          - docker
-          - version
-      changed_when: false
+    - name: Verify the Docker API is available on the build runner
+      community.docker.docker_host_info:
 
     - name: Login to the container registry from the build runner
-      ansible.builtin.command:
-        argv:
-          - docker
-          - login
-          - "{{ docker_registry }}"
-          - --username
-          - "{{ registry_username }}"
-          - --password-stdin
-        stdin: "{{ registry_token }}"
+      community.docker.docker_login:
+        registry_url: "{{ docker_registry }}"
+        username: "{{ registry_username }}"
+        password: "{{ registry_token }}"
+        reauthorize: true
       no_log: true
-      changed_when: true
 
     - name: Remove an existing local image with the requested version
-      ansible.builtin.command:
-        argv:
-          - docker
-          - image
-          - rm
-          - --force
-          - "{{ release_image }}"
-      register: requested_local_image_cleanup
-      failed_when: false
-      changed_when: requested_local_image_cleanup.rc == 0
+      community.docker.docker_image:
+        name: "{{ release_repository }}"
+        tag: "{{ image_version }}"
+        state: absent
+        force_absent: true
 
     - name: Remove dangling local images before the build
-      ansible.builtin.command:
-        argv:
-          - docker
-          - image
-          - prune
-          - --force
-          - --filter
-          - dangling=true
-      register: dangling_local_image_prune
-      changed_when: "'Deleted Images:' in dangling_local_image_prune.stdout"
+      community.docker.docker_prune:
+        images: true
+        images_filters:
+          dangling: true
 
-    - name: Initialize the versioned Docker build command
-      ansible.builtin.set_fact:
-        docker_build_argv:
-          - docker
-          - build
-          - --pull
-          - --file
-          - "{{ resolved_dockerfile_path }}"
-          - --tag
-          - "{{ release_image }}"
-          - --label
-          - "org.opencontainers.image.version={{ image_version }}"
-          - --label
-          - "org.opencontainers.image.revision={{ release_revision }}"
-          - --build-arg
-          - "APP_VERSION={{ image_version }}"
+    - name: Build and push the immutable versioned image
+      community.docker.docker_image:
+        name: "{{ release_repository }}"
+        tag: "{{ image_version }}"
+        state: present
+        source: build
+        force_source: true
+        push: true
+        build:
+          path: "{{ resolved_project_root }}"
+          dockerfile: "{{ dockerfile | default('Dockerfile', true) }}"
+          pull: true
+          args: "{{ docker_build_args }}"
+          labels: "{{ docker_build_labels }}"
 
-    - name: Add the regional Docker build argument
-      ansible.builtin.set_fact:
-        docker_build_argv: "{{ docker_build_argv + ['--build-arg', 'REGION_PARAMETER=' ~ region_param] }}"
-      when: region_param | default('', true) | length > 0
+    - name: Verify the published local image has the requested version tag
+      community.docker.docker_image_info:
+        name: "{{ release_image }}"
+      register: published_image_info
 
-    - name: Add the source repository label when available
-      ansible.builtin.set_fact:
-        docker_build_argv: >-
-          {{
-            docker_build_argv
-            + [
-                '--label',
-                'org.opencontainers.image.source=' ~ (image_source | default('', true))
-              ]
-          }}
-      when: image_source | default('', true) | length > 0
-
-    - name: Add the Docker build context
-      ansible.builtin.set_fact:
-        docker_build_argv: "{{ docker_build_argv + [resolved_project_root] }}"
-
-    - name: Build the immutable versioned image
-      ansible.builtin.command:
-        argv: "{{ docker_build_argv }}"
-      changed_when: true
-
-    - name: Verify the local image has the requested version tag
-      ansible.builtin.command:
-        argv:
-          - docker
-          - image
-          - inspect
-          - "{{ release_image }}"
-      changed_when: false
-
-    - name: Push the immutable versioned image to the container registry
-      ansible.builtin.command:
-        argv:
-          - docker
-          - image
-          - push
-          - "{{ release_image }}"
-      changed_when: true
+    - name: Stop when the requested image tag is missing after the build
+      ansible.builtin.assert:
+        that:
+          - published_image_info.images | length == 1
+        fail_msg: "Image {{ release_image }} is missing after the build."
 
     - name: Report the published image version
       ansible.builtin.debug:

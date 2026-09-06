@@ -16,7 +16,6 @@ target_servers:
       APM_TARGET_NAME: DELIVERY_TEMPLATE_KR_PRD_02
 
 port_mapping: "8080:80"
-deployment_root: /opt/delivery-template/kr-prd
 restart_policy: always
 
 extra_volumes:

@@ -14,12 +14,12 @@ GitHub와 연결된 자동화 자산은 모두 `.github` 아래에 둡니다. [c
 │   ├── ansible/
 │   │   ├── ansible.cfg
 │   │   ├── hosts.yml                      # controller only; targets are added at runtime
+│   │   ├── requirements.yml               # pinned community.docker collection
 │   │   ├── playbooks/                    # 모든 국가/환경에서 재사용
 │   │   │   ├── test.yml
 │   │   │   ├── build.yml
 │   │   │   ├── deploy.yml
 │   │   │   └── deploy_single_server.yml
-│   │   ├── templates/
 │   │   └── vars/
 │   │       ├── environments/{stg,prd}.yml # 환경 공통 메타데이터
 │   │       └── regions/                   # 권역 + 환경별 실제 배포 값
@@ -62,9 +62,9 @@ cicd.yml
 | `.github/workflows/deploy.yml` | Environment 시크릿 준비, deploy playbook 호출 |
 | `.github/ansible/vars/environments/{stg,prd}.yml` | SSH 사용자/포트, 테스트 명령, 순차 배포 수, 이미지 정리 정책 |
 | `.github/ansible/vars/regions/{region}/{env}.yml` | 이미지 이름, 레지스트리, Dockerfile, 대상 VM, 포트, 볼륨, 런타임 환경변수 |
-| `.github/ansible/playbooks/build.yml` | GHCR 로그인, 불변 이미지 버전 생성, 로컬 이미지 정리, Docker build/push |
+| `.github/ansible/playbooks/build.yml` | GHCR 로그인, 불변 이미지 버전 생성, 로컬 이미지 정리, Docker API build/push |
 | `.github/ansible/playbooks/deploy.yml` | 대상 VM 동적 inventory 생성과 순차 배포 |
-| `.github/ansible/playbooks/deploy_single_server.yml` | VM 1대의 pull, Compose 재생성, 헬스체크, 이전 이미지 정리 |
+| `.github/ansible/playbooks/deploy_single_server.yml` | VM 1대의 pull, Docker 네트워크/컨테이너 재생성, 헬스체크, 이전 이미지 정리 |
 
 ## Ansible 변수 로딩
 
@@ -96,7 +96,6 @@ target_servers:
       APM_TARGET_NAME: DELIVERY_TEMPLATE_KR_PRD_02
 
 port_mapping: "8080:80"
-deployment_root: /opt/delivery-template/kr-prd
 restart_policy: always
 extra_volumes:
   - /var/log/delivery-template:/app/log
@@ -110,11 +109,11 @@ stabilize_seconds: 15
 
 ## Ansible 빌드와 배포
 
-`build.yml`은 지정된 이미지 태그와 dangling 이미지를 정리한 뒤, 권역별 `REGION_PARAMETER`, 버전, Git revision OCI label을 넣어 이미지를 빌드합니다. 그 다음 `ghcr.io/<owner>/<build_name>:v1.<run>`에 push합니다.
+`build.yml`은 지정된 이미지 태그와 dangling 이미지를 정리한 뒤, 권역별 `REGION_PARAMETER`, 버전, Git revision OCI label을 넣어 이미지를 빌드합니다. 그 다음 `ghcr.io/<owner>/<build_name>:v1.<run>`에 push합니다. 이 단계는 `community.docker.docker_login`, `docker_image`, `docker_prune`, `docker_image_info`로 Docker API를 호출하며, CLI 문자열을 조립하지 않습니다.
 
-`deploy.yml`은 Environment 시크릿으로 받은 SSH 키와 known-hosts를 runner 임시 경로에 안전하게 준비하고, `target_servers`를 SSH runtime inventory로 등록합니다. `deploy_single_server.yml`은 각 VM에서 GHCR 로그인, 명시된 불변 태그 pull, Compose 파일 렌더링과 컨테이너 재생성, 포트/HTTP 헬스체크, 이전 이미지 제거, 다음 서버 전 안정화 대기를 수행합니다. Docker Remote API 포트는 열지 않고 SSH로만 VM Docker를 실행합니다.
+`deploy.yml`은 Environment 시크릿으로 받은 SSH 키와 known-hosts를 runner 임시 경로에 안전하게 준비하고, `target_servers`를 SSH runtime inventory로 등록합니다. `deploy_single_server.yml`은 각 VM에서 GHCR 로그인, 명시된 불변 태그 pull, Docker 네트워크와 컨테이너 재생성, 포트/HTTP 헬스체크, 이전 이미지 제거, 다음 서버 전 안정화 대기를 수행합니다. 환경변수, 포트, 볼륨, 레이블, 재시작 정책은 `community.docker.docker_container` 인자로 직접 전달합니다. Docker Remote API 포트는 열지 않고 SSH로만 VM Docker를 실행합니다.
 
-빌드는 runner Docker CLI를 사용하고, 배포는 `docker compose`와 legacy `docker-compose`를 자동 선택합니다. 따라서 VM의 Docker/Compose 세대가 달라도 같은 플레이북을 재사용할 수 있습니다.
+Compose 파일과 Compose 바이너리 의존성은 제거했습니다. 컨트롤러와 대상 VM에는 Docker API 1.25 이상, Python `requests`, 그리고 Docker socket에 접근할 수 있는 배포 사용자가 필요합니다. 컬렉션은 `.github/ansible/requirements.yml`에서 `community.docker` 5.2.2로 고정하고 setup action이 설치합니다.
 
 ## GitHub 환경과 시크릿
 
@@ -125,13 +124,16 @@ GitHub Environments를 `kr-stg`, `kr-prd`, `eu-stg`, `eu-prd`, `na-stg`, `na-prd
 
 `deploy.yml` reusable workflow가 해당 Environment를 직접 선언하므로, environment 시크릿을 workflow input으로 전달할 필요가 없습니다. `GITHUB_TOKEN`은 build/deploy workflow에서 `github.token`으로 사용합니다. 최상위 workflow는 reusable workflow의 권한을 높일 수 없다는 제약 때문에 `packages: write`를 허용하고, deploy workflow는 이를 `packages: read`로 낮춥니다.
 
-`prd` Environment에는 required reviewer 또는 deployment protection rule을 설정해 운영 배포를 보호하는 것을 권장합니다. 실제 이관 환경에서는 권역/환경 변수 파일의 예시 호스트, 배포 경로, 볼륨과 환경변수를 실값으로 교체합니다.
+`prd` Environment에는 required reviewer 또는 deployment protection rule을 설정해 운영 배포를 보호하는 것을 권장합니다. 실제 이관 환경에서는 권역/환경 변수 파일의 예시 호스트, 볼륨과 환경변수를 실값으로 교체합니다.
 
 ## 로컬 검증
 
 ~~~bash
 cd ansible-delivery-template
-python -m pip install ansible-core==2.17.7
+python -m pip install ansible-core==2.17.7 requests
+ansible-galaxy collection install \
+  --requirements-file .github/ansible/requirements.yml \
+  --collections-path .ansible/collections
 export ANSIBLE_CONFIG=.github/ansible/ansible.cfg
 export DEPLOY_COUNTRY=kr
 export DEPLOY_ENV=stg

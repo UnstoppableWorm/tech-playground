@@ -12,7 +12,6 @@ target_servers:
       APM_TARGET_NAME: DELIVERY_TEMPLATE_KR_STG_01
 
 port_mapping: "18080:80"
-deployment_root: /opt/delivery-template/kr-stg
 restart_policy: unless-stopped
 
 extra_volumes:

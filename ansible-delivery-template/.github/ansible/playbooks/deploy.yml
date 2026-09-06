@@ -45,7 +45,6 @@
           - registry_namespace | default('') | length > 0
           - target_servers | default([]) | length > 0
           - port_mapping | default('') | length > 0
-          - deployment_root | default('') | length > 0
           - restart_policy | default('') in ['always', 'unless-stopped', 'on-failure', 'no']
           - spring_profile | default('') | length > 0
           - health_check_port | default(0) | int > 0
@@ -137,23 +136,17 @@
           - build_name | default('') | length > 0
           - docker_registry | default('') | length > 0
           - registry_namespace | default('') | length > 0
-          - project_name | default('') | length > 0
-          - deployment_root | default('') | length > 0
           - spring_profile | default('') | length > 0
           - image_version | default('') is match('^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
           - registry_username | default('') | length > 0
           - registry_token | default('') | length > 0
         fail_msg: Check image version, registry settings, and registry credentials.
   tasks:
-    - name: Resolve the requested versioned image and deployment paths
+    - name: Resolve the requested versioned image and container names
       ansible.builtin.set_fact:
-        deployment_root_path: "{{ deployment_root }}"
-        compose_file_path: "{{ deployment_root }}/docker-compose.yml"
-        runtime_env_file_path: "{{ deployment_root }}/app.env"
-        release_repository: "{{ docker_registry | lower }}/{{ registry_namespace | lower }}/{{ build_name | lower }}"
         release_image: "{{ docker_registry | lower }}/{{ registry_namespace | lower }}/{{ build_name | lower }}:{{ image_version }}"
         deployed_container_name: "{{ build_name }}-{{ deployment_target_name }}"
-        compose_project_name: "{{ project_name }}-{{ deployment_target_name }}"
+        deployment_network_name: "{{ build_name }}-{{ deployment_target_name }}-network"
 
     - name: Deploy the current target server
       ansible.builtin.include_tasks: deploy_single_server.yml
