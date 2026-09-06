@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - .cicd/**
+      - .github/actions/**
       - .github/workflows/**
       - Dockerfile
       - static/**
@@ -12,6 +13,7 @@ on:
       - main
     paths:
       - .cicd/**
+      - .github/actions/**
       - .github/workflows/**
       - Dockerfile
       - static/**

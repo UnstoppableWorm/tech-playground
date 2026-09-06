@@ -33,6 +33,8 @@ GitHub Actions는 브랜치 규칙 또는 수동 실행, runner 선택, GitHub C
 ├── .github/workflows/
 │   ├── cicd.yml
 │   └── validate.yml
+├── .github/actions/
+│   └── setup-ansible/action.yml          # test/build/deploy 공통 준비
 ├── Dockerfile
 └── static/index.html
 ~~~
@@ -41,8 +43,9 @@ GitHub Actions는 브랜치 규칙 또는 수동 실행, runner 선택, GitHub C
 
 | 위치 | 책임 |
 | --- | --- |
-| .cicd/pipeline/{kr,eu,na}.yml | 권역별 테스트·빌드·배포 작업 이름과 변수 루트 |
+| .cicd/pipeline/{kr,eu,na}.yml | 권역 식별자와 Ansible 변수 루트 |
 | .cicd/vars/{stg,prd}.yml | GitHub runner, SSH 사용자/포트, 테스트 명령, 순차 배포 수, 이미지 정리 정책 |
+| .github/actions/setup-ansible | checkout, Python, 고정 Ansible 버전을 세 stage에서 공통 사용 |
 | .cicd/ansible/vars/{country}/{env}.yml | `build_name`, 레지스트리, Dockerfile, `target_servers`, 포트, 볼륨, 런타임 환경변수 |
 | .cicd/ansible/playbooks/build.yml | 레지스트리 로그인, 이전 로컬 태그·dangling 이미지 정리, 권역별 이미지 빌드와 push |
 | .cicd/ansible/playbooks/deploy.yml | 대상 그룹 검증과 공통 이미지 정보 계산 |
@@ -89,7 +92,7 @@ stabilize_seconds: 15
 
 ## GitHub Actions 흐름
 
-사진의 GitLab `workflow.rules`와 환경별 `include`는 GitHub Actions의 `push` trigger와 `resolve` job으로 대응합니다. 자동 실행은 원본 KR 파이프라인과 같은 기준으로 연결합니다.
+사진의 GitLab `workflow.rules`와 환경별 `include`는 GitHub Actions의 `push` trigger와 최소 `resolve` job으로 대응합니다. `resolve`는 country/environment, 이미지 버전, runner와 변수 루트만 결정하며 작업명 같은 중복 메타데이터는 읽지 않습니다. 자동 실행은 원본 KR 파이프라인과 같은 기준으로 연결합니다.
 
 | GitHub 이벤트 | 선택 결과 | 실행 흐름 |
 | --- | --- | --- |

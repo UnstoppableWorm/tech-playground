@@ -1,0 +1,14 @@
+name: Setup Ansible
+description: Check out the repository and install the pinned Ansible runtime.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install ansible-core==2.17.7

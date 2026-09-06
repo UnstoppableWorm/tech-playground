@@ -1,6 +1,3 @@
 pipeline:
   country: na
-  test_job_name: test_na
-  build_job_name: build_na
-  deploy_job_name: deploy_na
   ansible_var_root: .cicd/ansible/vars/na
