@@ -61,7 +61,7 @@ Ansible의 Java 관련 모듈은 Java keystore/인증서 관리나 Maven 저장�
 
 ## 변수 분리
 
-`environments/{stg,prd}.yml`은 SSH 접속 정보, 순차 배포 수, 이미지 정리 같은 환경 공통 정책을 둡니다. `regions/{kr,eu,na}/{stg,prd}.yml`은 권역·환경 조합별 이미지명, 대상 VM, 포트, 볼륨, 런타임 환경변수를 둡니다.
+`environments/{stg,prd}.yml`은 SSH 접속 정보, 순차 배포 수, 이미지 정리 같은 환경 공통 정책을 둡니다. `regions/{kr,eu,na}/{stg,prd}.yml`은 권역·환경 조합별 레지스트리 namespace, 이미지명, 대상 VM, 포트, 볼륨, 런타임 환경변수를 둡니다.
 
 ~~~yaml
 build_name: delivery-template-kr-prd
@@ -69,6 +69,7 @@ region_param: KR
 spring_profile: "kr,prd"
 
 docker_registry: ghcr.io
+registry_namespace: unstoppableworm
 dockerfile: Dockerfile
 
 target_servers:
@@ -114,10 +115,9 @@ export IMAGE_VERSION=v1.local
 ansible-playbook .github/ansible/playbooks/test.yml
 ~~~
 
-로컬 build/push에는 아래 값만 추가합니다. GitHub Actions에서는 기본 GitHub 환경변수를 Ansible이 자동으로 사용합니다.
+로컬 build/push에는 레지스트리 사용자와 토큰을 명시적으로 전달해야 합니다. 값이 없으면 build/deploy playbook의 검증 단계에서 즉시 실패합니다. `registry_namespace`는 선택한 권역·환경 변수 파일에서 읽습니다.
 
 ~~~bash
-export REGISTRY_NAMESPACE=<github-owner-or-namespace>
 export REGISTRY_USERNAME=<github-username>
 export REGISTRY_TOKEN=<github-token-with-packages-write>
 ansible-playbook .github/ansible/playbooks/build.yml

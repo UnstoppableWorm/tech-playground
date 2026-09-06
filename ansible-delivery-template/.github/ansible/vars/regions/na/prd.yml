@@ -3,6 +3,7 @@ region_param: NA
 spring_profile: "na,prd"
 
 docker_registry: ghcr.io
+registry_namespace: unstoppableworm
 dockerfile: Dockerfile
 
 target_servers:

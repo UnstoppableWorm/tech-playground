@@ -1,6 +1,6 @@
 ---
 # Shared build template. Country/environment files provide build_name,
-# docker_registry, dockerfile, and optional region_param.
+# docker_registry, registry_namespace, dockerfile, and optional region_param.
 - name: Build and push a country-specific release image
   hosts: localhost
   connection: local
@@ -23,21 +23,8 @@
         if lookup('ansible.builtin.env', 'GITHUB_REPOSITORY') | length > 0
         else ''
       }}
-    registry_namespace: >-
-      {{
-        lookup('ansible.builtin.env', 'REGISTRY_NAMESPACE')
-        | default(lookup('ansible.builtin.env', 'GITHUB_REPOSITORY_OWNER'), true)
-      }}
-    registry_username: >-
-      {{
-        lookup('ansible.builtin.env', 'REGISTRY_USERNAME')
-        | default(lookup('ansible.builtin.env', 'GITHUB_ACTOR'), true)
-      }}
-    registry_token: >-
-      {{
-        lookup('ansible.builtin.env', 'REGISTRY_TOKEN')
-        | default(lookup('ansible.builtin.env', 'GITHUB_TOKEN'), true)
-      }}
+    registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') }}"
+    registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
     resolved_project_root: >-
       {{
         lookup('ansible.builtin.env', 'PROJECT_ROOT')

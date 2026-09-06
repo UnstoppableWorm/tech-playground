@@ -27,7 +27,8 @@ jobs:
       DEPLOY_COUNTRY: ${{ inputs.country }}
       DEPLOY_ENV: ${{ inputs.deploy_env }}
       IMAGE_VERSION: ${{ inputs.image_version }}
-      GITHUB_TOKEN: ${{ github.token }}
+      REGISTRY_USERNAME: ${{ github.actor }}
+      REGISTRY_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-ansible

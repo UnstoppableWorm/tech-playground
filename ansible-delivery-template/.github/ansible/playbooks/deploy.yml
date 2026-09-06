@@ -8,11 +8,6 @@
     country: "{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}"
     deploy_env: "{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}"
     image_version: "{{ lookup('ansible.builtin.env', 'IMAGE_VERSION') }}"
-    registry_namespace: >-
-      {{
-        lookup('ansible.builtin.env', 'REGISTRY_NAMESPACE')
-        | default(lookup('ansible.builtin.env', 'GITHUB_REPOSITORY_OWNER'), true)
-      }}
     dynamic_target_group: "delivery_{{ country }}_{{ deploy_env }}"
     deployment_ssh_private_key: "{{ lookup('ansible.builtin.env', 'SSH_PRIVATE_KEY') }}"
     deployment_ssh_known_hosts: "{{ lookup('ansible.builtin.env', 'SSH_KNOWN_HOSTS') }}"
@@ -109,21 +104,8 @@
     country: "{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}"
     deploy_env: "{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}"
     image_version: "{{ lookup('ansible.builtin.env', 'IMAGE_VERSION') }}"
-    registry_namespace: >-
-      {{
-        lookup('ansible.builtin.env', 'REGISTRY_NAMESPACE')
-        | default(lookup('ansible.builtin.env', 'GITHUB_REPOSITORY_OWNER'), true)
-      }}
-    registry_username: >-
-      {{
-        lookup('ansible.builtin.env', 'REGISTRY_USERNAME')
-        | default(lookup('ansible.builtin.env', 'GITHUB_ACTOR'), true)
-      }}
-    registry_token: >-
-      {{
-        lookup('ansible.builtin.env', 'REGISTRY_TOKEN')
-        | default(lookup('ansible.builtin.env', 'GITHUB_TOKEN'), true)
-      }}
+    registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') }}"
+    registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
   vars_files:
     - "{{ playbook_dir }}/../vars/environments/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
     - "{{ playbook_dir }}/../vars/regions/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"

@@ -33,7 +33,8 @@ jobs:
           DEPLOY_COUNTRY: ${{ inputs.country }}
           DEPLOY_ENV: ${{ inputs.deploy_env }}
           IMAGE_VERSION: ${{ inputs.image_version }}
-          GITHUB_TOKEN: ${{ github.token }}
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.token }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: ansible-playbook .github/ansible/playbooks/deploy.yml
