@@ -3,7 +3,7 @@ name: validate-cicd-template
 on:
   pull_request:
     paths:
-      - .cicd/**
+      - .github/ansible/**
       - .github/actions/**
       - .github/workflows/**
       - Dockerfile
@@ -12,7 +12,7 @@ on:
     branches:
       - main
     paths:
-      - .cicd/**
+      - .github/ansible/**
       - .github/actions/**
       - .github/workflows/**
       - Dockerfile
@@ -51,8 +51,8 @@ jobs:
           REGISTRY_USERNAME: validation
           REGISTRY_TOKEN: validation
         run: |
-          export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
+          export ANSIBLE_CONFIG=.github/ansible/ansible.cfg
           ansible-inventory --graph
           for playbook in test build deploy; do
-            ansible-playbook ".cicd/ansible/playbooks/${playbook}.yml" --syntax-check
+            ansible-playbook ".github/ansible/playbooks/${playbook}.yml" --syntax-check
           done

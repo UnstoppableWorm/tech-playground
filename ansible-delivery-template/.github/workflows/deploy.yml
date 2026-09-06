@@ -25,7 +25,7 @@ jobs:
     env:
       ANSIBLE_FORCE_COLOR: "true"
       PY_COLORS: "1"
-      ANSIBLE_CONFIG: .cicd/ansible/ansible.cfg
+      ANSIBLE_CONFIG: .github/ansible/ansible.cfg
       DEPLOY_COUNTRY: ${{ inputs.country }}
       DEPLOY_ENV: ${{ inputs.deploy_env }}
       IMAGE_VERSION: ${{ inputs.image_version }}
@@ -46,4 +46,4 @@ jobs:
           printf 'ANSIBLE_PRIVATE_KEY_FILE=%s\n' "$RUNNER_TEMP/deploy-ssh/id_rsa" >> "$GITHUB_ENV"
           printf 'ANSIBLE_SSH_ARGS=%s\n' "-o UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
       - name: Deploy the requested image version
-        run: ansible-playbook .cicd/ansible/playbooks/deploy.yml
+        run: ansible-playbook .github/ansible/playbooks/deploy.yml

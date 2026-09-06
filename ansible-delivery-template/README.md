@@ -1,31 +1,31 @@
 # VM Migration Ansible CI/CD Template
 
-신규 클라우드 환경으로 VM을 이관할 때, GitLab CI에 섞여 있던 권역별·환경별 설정과 반복 배포 스테이지를 분리한 GitHub Actions 템플릿입니다.
+신규 클라우드 환경으로 VM을 이관할 때, 권역별·환경별 설정과 반복 배포 단계를 분리한 GitHub Actions 템플릿입니다.
 
-GitHub Actions의 reusable workflow를 사용하되, 국가별 pipeline 분리는 아직 만들지 않습니다. [cicd.yml](.github/workflows/cicd.yml)은 `test.yml -> build.yml -> deploy.yml` 세 workflow만 호출하고, 각 workflow가 해당 Ansible 플레이북을 실행합니다. 국가·환경별 값과 실제 빌드·배포 구현은 모두 Ansible에 둡니다.
+GitHub와 연결된 자동화 자산은 모두 `.github` 아래에 둡니다. [cicd.yml](.github/workflows/cicd.yml)은 `test.yml -> build.yml -> deploy.yml` 세 reusable workflow만 호출하고, 각 workflow가 `.github/ansible`의 실제 Ansible 플레이북을 실행합니다. 국가·환경별 값과 빌드·배포 구현은 Ansible에만 둡니다.
 
 ## 구조
 
 ~~~text
 .
-├── .cicd/
-│   ├── vars/                             # 검증/운영 공통 메타데이터
-│   │   ├── stg.yml
-│   │   └── prd.yml
-│   └── ansible/
-│       ├── inventories/hosts.yml
-│       ├── playbooks/                    # 모든 국가/환경에서 재사용
-│       │   ├── test.yml
-│       │   ├── build.yml
-│       │   ├── deploy.yml
-│       │   └── deploy_single_server.yml
-│       ├── templates/
-│       └── vars/                         # 국가 + 환경별 실제 배포 값
-│           ├── kr/{stg,prd}.yml
-│           ├── eu/{stg,prd}.yml
-│           └── na/{stg,prd}.yml
 ├── .github/
-│   ├── actions/setup-ansible/action.yml
+│   ├── actions/
+│   │   └── setup-ansible/action.yml
+│   ├── ansible/
+│   │   ├── ansible.cfg
+│   │   ├── inventory/hosts.yml
+│   │   ├── playbooks/                    # 모든 국가/환경에서 재사용
+│   │   │   ├── test.yml
+│   │   │   ├── build.yml
+│   │   │   ├── deploy.yml
+│   │   │   └── deploy_single_server.yml
+│   │   ├── templates/
+│   │   └── vars/
+│   │       ├── environments/{stg,prd}.yml # 환경 공통 메타데이터
+│   │       └── regions/                   # 권역 + 환경별 실제 배포 값
+│   │           ├── kr/{stg,prd}.yml
+│   │           ├── eu/{stg,prd}.yml
+│   │           └── na/{stg,prd}.yml
 │   └── workflows/
 │       ├── cicd.yml                      # 진입 workflow와 stage 순서
 │       ├── test.yml                      # Ansible test.yml 호출
@@ -36,19 +36,21 @@ GitHub Actions의 reusable workflow를 사용하되, 국가별 pipeline 분리�
 └── static/index.html
 ~~~
 
+`environments`는 검증/운영 공통 정책을, `regions`는 KR/EU/NA와 환경 조합별 레지스트리·대상 VM·포트·볼륨·런타임 환경변수를 의미합니다.
+
 ## 호출 흐름
 
 ~~~text
 cicd.yml
-  -> test.yml   -> .cicd/ansible/playbooks/test.yml
-  -> build.yml  -> .cicd/ansible/playbooks/build.yml
-  -> deploy.yml -> .cicd/ansible/playbooks/deploy.yml
+  -> test.yml   -> .github/ansible/playbooks/test.yml
+  -> build.yml  -> .github/ansible/playbooks/build.yml
+  -> deploy.yml -> .github/ansible/playbooks/deploy.yml
                   -> deploy_single_server.yml
 ~~~
 
 `cicd.yml`은 branch trigger, 수동 `country`/`deploy_env` 입력, `test -> build -> deploy` 의존성, 불변 이미지 버전만 관리합니다. 레지스트리 주소, 프로젝트 이름, Dockerfile, 대상 서버, 포트, 볼륨, 애플리케이션 환경변수는 workflow에 두지 않습니다.
 
-나중에 특정 국가나 환경에 별도 scan, 승인, migration 같은 추가 step이 필요해지면 그 시점에만 `pipeline-kr.yml` 같은 reusable workflow를 추가해 해당 stage 앞뒤에 연결합니다. 현재는 공통 stage만 유지합니다.
+나중에 특정 권역이나 환경에 별도 scan, 승인, migration 같은 단계가 필요해지면 그때만 별도 reusable workflow를 추가해 해당 stage 앞뒤에 연결합니다. 현재는 공통 stage만 유지합니다.
 
 ## 역할 분리
 
@@ -58,22 +60,22 @@ cicd.yml
 | `.github/workflows/test.yml` | checkout, Ansible 준비, test playbook 호출 |
 | `.github/workflows/build.yml` | checkout, Ansible 준비, build playbook 호출 |
 | `.github/workflows/deploy.yml` | Environment 시크릿 준비, deploy playbook 호출 |
-| `.cicd/vars/{stg,prd}.yml` | SSH 사용자/포트, 테스트 명령, 순차 배포 수, 이미지 정리 정책 |
-| `.cicd/ansible/vars/{country}/{env}.yml` | 이미지 이름, 레지스트리, Dockerfile, 대상 VM, 포트, 볼륨, 런타임 환경변수 |
-| `.cicd/ansible/playbooks/build.yml` | GHCR 로그인, 불변 이미지 버전 생성, 로컬 이미지 정리, Docker build/push |
-| `.cicd/ansible/playbooks/deploy.yml` | 대상 VM 동적 inventory 생성과 순차 배포 |
-| `.cicd/ansible/playbooks/deploy_single_server.yml` | VM 1대의 pull, Compose 재생성, 헬스체크, 이전 이미지 정리 |
+| `.github/ansible/vars/environments/{stg,prd}.yml` | SSH 사용자/포트, 테스트 명령, 순차 배포 수, 이미지 정리 정책 |
+| `.github/ansible/vars/regions/{region}/{env}.yml` | 이미지 이름, 레지스트리, Dockerfile, 대상 VM, 포트, 볼륨, 런타임 환경변수 |
+| `.github/ansible/playbooks/build.yml` | GHCR 로그인, 불변 이미지 버전 생성, 로컬 이미지 정리, Docker build/push |
+| `.github/ansible/playbooks/deploy.yml` | 대상 VM 동적 inventory 생성과 순차 배포 |
+| `.github/ansible/playbooks/deploy_single_server.yml` | VM 1대의 pull, Compose 재생성, 헬스체크, 이전 이미지 정리 |
 
 ## Ansible 변수 로딩
 
 각 playbook은 내부 `vars_files`에서 아래 두 파일을 직접 로드합니다. workflow가 YAML을 파싱하거나 수십 개의 `-e` 인자를 전달하지 않습니다.
 
 ~~~text
-.cicd/vars/${DEPLOY_ENV}.yml
-.cicd/ansible/vars/${DEPLOY_COUNTRY}/${DEPLOY_ENV}.yml
+.github/ansible/vars/environments/${DEPLOY_ENV}.yml
+.github/ansible/vars/regions/${DEPLOY_COUNTRY}/${DEPLOY_ENV}.yml
 ~~~
 
-국가와 환경의 실제 차이는 `.cicd/ansible/vars/{country}/{env}.yml` 한 파일에 평면으로 둡니다. 서버별 `extra_env`와 공통 `extra_env`를 함께 쓸 수 있습니다.
+국가와 환경의 실제 차이는 `.github/ansible/vars/regions/{region}/{env}.yml` 한 파일에 평면으로 둡니다. 서버별 `extra_env`와 공통 `extra_env`를 함께 쓸 수 있습니다.
 
 ~~~yaml
 build_name: delivery-template-kr-prd
@@ -123,20 +125,20 @@ GitHub Environments를 `kr-stg`, `kr-prd`, `eu-stg`, `eu-prd`, `na-stg`, `na-prd
 
 `deploy.yml` reusable workflow가 해당 Environment를 직접 선언하므로, environment 시크릿을 workflow input으로 전달할 필요가 없습니다. `GITHUB_TOKEN`은 build/deploy workflow에서 `github.token`으로 사용합니다. 최상위 workflow는 reusable workflow의 권한을 높일 수 없다는 제약 때문에 `packages: write`를 허용하고, deploy workflow는 이를 `packages: read`로 낮춥니다.
 
-`prd` Environment에는 required reviewer 또는 deployment protection rule을 설정해 운영 배포를 보호하는 것을 권장합니다. 실제 이관 환경에서는 국가/환경 변수 파일의 예시 호스트, 배포 경로, 볼륨과 환경변수를 실값으로 교체합니다.
+`prd` Environment에는 required reviewer 또는 deployment protection rule을 설정해 운영 배포를 보호하는 것을 권장합니다. 실제 이관 환경에서는 권역/환경 변수 파일의 예시 호스트, 배포 경로, 볼륨과 환경변수를 실값으로 교체합니다.
 
 ## 로컬 검증
 
 ~~~bash
 cd ansible-delivery-template
 python -m pip install ansible-core==2.17.7
-export ANSIBLE_CONFIG=.cicd/ansible/ansible.cfg
+export ANSIBLE_CONFIG=.github/ansible/ansible.cfg
 export DEPLOY_COUNTRY=kr
 export DEPLOY_ENV=stg
 export IMAGE_VERSION=v1.local
 
 ansible-inventory --graph
-ansible-playbook .cicd/ansible/playbooks/test.yml
+ansible-playbook .github/ansible/playbooks/test.yml
 ~~~
 
 실제 로컬 빌드/push에는 아래 값만 추가합니다. GitHub Actions에서는 기본 GitHub 환경변수를 Ansible이 자동으로 사용합니다.
@@ -145,5 +147,5 @@ ansible-playbook .cicd/ansible/playbooks/test.yml
 export REGISTRY_NAMESPACE=<github-owner-or-namespace>
 export REGISTRY_USERNAME=<github-username>
 export REGISTRY_TOKEN=<github-token-with-packages-write>
-ansible-playbook .cicd/ansible/playbooks/build.yml
+ansible-playbook .github/ansible/playbooks/build.yml
 ~~~

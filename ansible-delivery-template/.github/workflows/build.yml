@@ -23,7 +23,7 @@ jobs:
     env:
       ANSIBLE_FORCE_COLOR: "true"
       PY_COLORS: "1"
-      ANSIBLE_CONFIG: .cicd/ansible/ansible.cfg
+      ANSIBLE_CONFIG: .github/ansible/ansible.cfg
       DEPLOY_COUNTRY: ${{ inputs.country }}
       DEPLOY_ENV: ${{ inputs.deploy_env }}
       IMAGE_VERSION: ${{ inputs.image_version }}
@@ -32,4 +32,4 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-ansible
       - name: Build and publish the configured image
-        run: ansible-playbook .cicd/ansible/playbooks/build.yml
+        run: ansible-playbook .github/ansible/playbooks/build.yml
