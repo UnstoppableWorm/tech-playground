@@ -1,22 +1,32 @@
-target:
-  group: eu_prd
-  name: eu-prd
-  deployment_root: /opt/delivery-template/eu-prd
-  host_port: 8080
-  container_port: 80
-  restart_policy: always
-  healthcheck_path: /
-  extra_volumes: []
-  runtime_env: {}
+build_name: delivery-template-eu-prd
+region_param: EU
+spring_profile: "eu,prd"
 
-release:
-  app_name: delivery-template-app
-  image_name: delivery-template-app
-  dockerfile: Dockerfile
-  build_args:
-    REGION_PARAMETER: eu
-  runtime_env:
-    TZ: Europe/Berlin
-    APP_REGION: eu
-    APP_BASE_URL: https://eu.example.com
-    SPRING_PROFILES_ACTIVE: eu,prd
+docker_registry: ghcr.io
+dockerfile: Dockerfile
+
+target_servers:
+  - name: eu-prd-app-1
+    host: eu-prd-app-1.example.internal
+    extra_env:
+      APM_TARGET_NAME: DELIVERY_TEMPLATE_EU_PRD_01
+  - name: eu-prd-app-2
+    host: eu-prd-app-2.example.internal
+    extra_env:
+      APM_TARGET_NAME: DELIVERY_TEMPLATE_EU_PRD_02
+
+port_mapping: "8080:80"
+deployment_root: /opt/delivery-template/eu-prd
+restart_policy: always
+
+extra_volumes:
+  - /var/log/delivery-template:/app/log
+
+extra_env:
+  TZ: Europe/Berlin
+  APP_REGION: eu
+  APP_BASE_URL: https://eu.example.com
+
+health_check_port: 8080
+health_check_path: /
+stabilize_seconds: 15

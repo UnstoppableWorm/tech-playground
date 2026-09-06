@@ -27,7 +27,7 @@ on:
           - build_and_deploy
           - deploy_only
       image_version:
-        description: Immutable GHCR image version; defaults to the Git commit SHA
+        description: Immutable GHCR image version; defaults to v1.<GitHub run number>
         required: false
         default: ""
 
@@ -50,6 +50,7 @@ jobs:
       build_job_name: ${{ steps.metadata.outputs.build_job_name }}
       deploy_job_name: ${{ steps.metadata.outputs.deploy_job_name }}
       country_var_root: ${{ steps.metadata.outputs.country_var_root }}
+      image_version: ${{ steps.metadata.outputs.image_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -59,6 +60,8 @@ jobs:
         env:
           COUNTRY: ${{ inputs.country }}
           DEPLOY_ENV: ${{ inputs.deploy_env }}
+          RELEASE_MODE: ${{ inputs.release_mode }}
+          INPUT_IMAGE_VERSION: ${{ inputs.image_version }}
         run: |
           set -euo pipefail
           case "$COUNTRY" in kr|eu|na) ;; *) exit 1 ;; esac
@@ -74,6 +77,7 @@ jobs:
           build_job_name="$(sed -n 's/^  build_job_name:[[:space:]]*//p' "$pipeline_file")"
           deploy_job_name="$(sed -n 's/^  deploy_job_name:[[:space:]]*//p' "$pipeline_file")"
           country_var_root="$(sed -n 's/^  ansible_var_root:[[:space:]]*//p' "$pipeline_file")"
+          image_version="${INPUT_IMAGE_VERSION:-v1.${GITHUB_RUN_NUMBER}}"
 
           test -n "$test_runner"
           test -n "$build_runner"
@@ -83,6 +87,14 @@ jobs:
           test -n "$build_job_name"
           test -n "$deploy_job_name"
           test -n "$country_var_root"
+          if [ "$RELEASE_MODE" = "deploy_only" ] && [ -z "$INPUT_IMAGE_VERSION" ]; then
+            echo "deploy_only requires an existing image_version" >&2
+            exit 1
+          fi
+          if ! [[ "$image_version" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "image_version must be a valid Docker tag" >&2
+            exit 1
+          fi
           printf 'test_runner=%s\n' "$test_runner" >> "$GITHUB_OUTPUT"
           printf 'build_runner=%s\n' "$build_runner" >> "$GITHUB_OUTPUT"
           printf 'deploy_runner=%s\n' "$deploy_runner" >> "$GITHUB_OUTPUT"
@@ -90,6 +102,7 @@ jobs:
           printf 'build_job_name=%s\n' "$build_job_name" >> "$GITHUB_OUTPUT"
           printf 'deploy_job_name=%s\n' "$deploy_job_name" >> "$GITHUB_OUTPUT"
           printf 'country_var_root=%s\n' "$country_var_root" >> "$GITHUB_OUTPUT"
+          printf 'image_version=%s\n' "$image_version" >> "$GITHUB_OUTPUT"
 
   test:
     name: ${{ needs.resolve.outputs.test_job_name }} (${{ inputs.deploy_env }})
@@ -147,7 +160,7 @@ jobs:
       COUNTRY: ${{ inputs.country }}
       DEPLOY_ENV: ${{ inputs.deploy_env }}
       COUNTRY_VAR_ROOT: ${{ needs.resolve.outputs.country_var_root }}
-      IMAGE_VERSION: ${{ inputs.image_version != '' && inputs.image_version || github.sha }}
+      IMAGE_VERSION: ${{ needs.resolve.outputs.image_version }}
       REGISTRY_NAMESPACE: ${{ github.repository_owner }}
       REGISTRY_USERNAME: ${{ github.actor }}
       REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -198,7 +211,7 @@ jobs:
       COUNTRY: ${{ inputs.country }}
       DEPLOY_ENV: ${{ inputs.deploy_env }}
       COUNTRY_VAR_ROOT: ${{ needs.resolve.outputs.country_var_root }}
-      IMAGE_VERSION: ${{ inputs.image_version != '' && inputs.image_version || github.sha }}
+      IMAGE_VERSION: ${{ needs.resolve.outputs.image_version }}
       REGISTRY_NAMESPACE: ${{ github.repository_owner }}
       REGISTRY_USERNAME: ${{ github.actor }}
       REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}

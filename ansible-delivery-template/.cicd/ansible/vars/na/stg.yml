@@ -1,22 +1,28 @@
-target:
-  group: na_stg
-  name: na-stg
-  deployment_root: /opt/delivery-template/na-stg
-  host_port: 18080
-  container_port: 80
-  restart_policy: unless-stopped
-  healthcheck_path: /
-  extra_volumes: []
-  runtime_env: {}
+build_name: delivery-template-na-stg
+region_param: NA
+spring_profile: "na,stg"
 
-release:
-  app_name: delivery-template-app
-  image_name: delivery-template-app
-  dockerfile: Dockerfile
-  build_args:
-    REGION_PARAMETER: na
-  runtime_env:
-    TZ: America/Toronto
-    APP_REGION: na
-    APP_BASE_URL: https://stg-na.example.com
-    SPRING_PROFILES_ACTIVE: na,stg
+docker_registry: ghcr.io
+dockerfile: Dockerfile
+
+target_servers:
+  - name: na-stg-app-1
+    host: na-stg-app-1.example.internal
+    extra_env:
+      APM_TARGET_NAME: DELIVERY_TEMPLATE_NA_STG_01
+
+port_mapping: "18080:80"
+deployment_root: /opt/delivery-template/na-stg
+restart_policy: unless-stopped
+
+extra_volumes:
+  - /var/log/delivery-template:/app/log
+
+extra_env:
+  TZ: America/Toronto
+  APP_REGION: na
+  APP_BASE_URL: https://stg-na.example.com
+
+health_check_port: 18080
+health_check_path: /
+stabilize_seconds: 0

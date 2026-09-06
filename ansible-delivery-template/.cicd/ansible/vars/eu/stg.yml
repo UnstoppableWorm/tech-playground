@@ -1,22 +1,28 @@
-target:
-  group: eu_stg
-  name: eu-stg
-  deployment_root: /opt/delivery-template/eu-stg
-  host_port: 18080
-  container_port: 80
-  restart_policy: unless-stopped
-  healthcheck_path: /
-  extra_volumes: []
-  runtime_env: {}
+build_name: delivery-template-eu-stg
+region_param: EU
+spring_profile: "eu,stg"
 
-release:
-  app_name: delivery-template-app
-  image_name: delivery-template-app
-  dockerfile: Dockerfile
-  build_args:
-    REGION_PARAMETER: eu
-  runtime_env:
-    TZ: Europe/Berlin
-    APP_REGION: eu
-    APP_BASE_URL: https://stg-eu.example.com
-    SPRING_PROFILES_ACTIVE: eu,stg
+docker_registry: ghcr.io
+dockerfile: Dockerfile
+
+target_servers:
+  - name: eu-stg-app-1
+    host: eu-stg-app-1.example.internal
+    extra_env:
+      APM_TARGET_NAME: DELIVERY_TEMPLATE_EU_STG_01
+
+port_mapping: "18080:80"
+deployment_root: /opt/delivery-template/eu-stg
+restart_policy: unless-stopped
+
+extra_volumes:
+  - /var/log/delivery-template:/app/log
+
+extra_env:
+  TZ: Europe/Berlin
+  APP_REGION: eu
+  APP_BASE_URL: https://stg-eu.example.com
+
+health_check_port: 18080
+health_check_path: /
+stabilize_seconds: 0

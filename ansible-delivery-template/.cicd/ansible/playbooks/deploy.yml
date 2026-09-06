@@ -1,37 +1,76 @@
 ---
-- name: Deploy a country-specific release to the selected VM group
-  hosts: "{{ target.group | default('target_group_required') }}"
+# Shared deployment template. target_servers is converted to a runtime SSH inventory.
+- name: Register country-specific target servers
+  hosts: localhost
+  connection: local
   gather_facts: false
-  serial: "{{ deployment_environment.deploy_serial | default('100%') }}"
   vars:
-    registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') }}"
-    registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
+    dynamic_target_group: "delivery_{{ country }}_{{ deploy_env }}"
   pre_tasks:
-    - name: Validate selected country, environment, target, and image version
+    - name: Validate selected country, environment, and target servers
       ansible.builtin.assert:
         that:
           - pipeline.country == country
           - deployment_environment.code == deploy_env
-          - target.group in group_names
-          - target.deployment_root | length > 0
-          - release.app_name | length > 0
-          - container_registry.host | default('') | length > 0
-          - container_registry.namespace | default('') | length > 0
-          - release.image_name | length > 0
+          - build_name | default('') | length > 0
+          - docker_registry | default('') | length > 0
+          - registry_namespace | default('') | length > 0
+          - target_servers | default([]) | length > 0
+          - port_mapping | default('') | length > 0
+          - deployment_root | default('') | length > 0
+          - restart_policy | default('') in ['always', 'unless-stopped', 'on-failure', 'no']
+          - spring_profile | default('') | length > 0
+          - health_check_port | default(0) | int > 0
+          - deployment_ssh is defined
+          - deployment_ssh.user | default('', true) | length > 0
+          - deployment_ssh.port | default(0, true) | int > 0
+        fail_msg: Check country, deploy environment, registry settings, and target_servers.
+  tasks:
+    - name: Add each configured server to the runtime inventory
+      ansible.builtin.add_host:
+        name: "{{ item.name | default(item.host, true) }}"
+        groups: "{{ dynamic_target_group }}"
+        ansible_host: "{{ item.host }}"
+        ansible_user: "{{ deployment_ssh.user }}"
+        ansible_port: "{{ deployment_ssh.port }}"
+        deployment_target_name: "{{ item.name | default(item.host, true) }}"
+        server_extra_env: "{{ item.extra_env | default({}) }}"
+        server_extra_volumes: "{{ item.extra_volumes | default([]) }}"
+      loop: "{{ target_servers }}"
+      loop_control:
+        label: "{{ item.name | default(item.host, true) }}"
+
+- name: Deploy a country-specific release to registered target servers
+  hosts: "delivery_{{ country }}_{{ deploy_env }}"
+  gather_facts: false
+  serial: "{{ deployment_environment.deploy_serial | default(1) }}"
+  vars:
+    registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') }}"
+    registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
+  pre_tasks:
+    - name: Validate the deployment context and registry credentials
+      ansible.builtin.assert:
+        that:
+          - build_name | default('') | length > 0
+          - docker_registry | default('') | length > 0
+          - registry_namespace | default('') | length > 0
+          - project_name | default('') | length > 0
+          - deployment_root | default('') | length > 0
+          - spring_profile | default('') | length > 0
           - image_version | default('') is match('^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
           - registry_username | default('') | length > 0
           - registry_token | default('') | length > 0
-        fail_msg: Check country, deploy environment, inventory target, image_version, and registry credentials.
+        fail_msg: Check image version, registry settings, and registry credentials.
   tasks:
     - name: Resolve the requested versioned image and deployment paths
       ansible.builtin.set_fact:
-        deployment_root: "{{ target.deployment_root }}"
-        compose_file_path: "{{ target.deployment_root }}/docker-compose.yml"
-        runtime_env_file_path: "{{ target.deployment_root }}/app.env"
-        release_repository: "{{ container_registry.host | lower }}/{{ container_registry.namespace | lower }}/{{ release.image_name | lower }}"
-        release_image: "{{ container_registry.host | lower }}/{{ container_registry.namespace | lower }}/{{ release.image_name | lower }}:{{ image_version }}"
-        deployed_container_name: "{{ release.app_name }}-{{ target.name }}"
-        compose_project_name: "{{ release.app_name }}-{{ target.name }}"
+        deployment_root_path: "{{ deployment_root }}"
+        compose_file_path: "{{ deployment_root }}/docker-compose.yml"
+        runtime_env_file_path: "{{ deployment_root }}/app.env"
+        release_repository: "{{ docker_registry | lower }}/{{ registry_namespace | lower }}/{{ build_name | lower }}"
+        release_image: "{{ docker_registry | lower }}/{{ registry_namespace | lower }}/{{ build_name | lower }}:{{ image_version }}"
+        deployed_container_name: "{{ build_name }}-{{ deployment_target_name }}"
+        compose_project_name: "{{ project_name }}-{{ deployment_target_name }}"
 
     - name: Deploy the current target server
       ansible.builtin.include_tasks: deploy_single_server.yml

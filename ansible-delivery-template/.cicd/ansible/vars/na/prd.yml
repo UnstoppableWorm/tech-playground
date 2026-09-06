@@ -1,22 +1,32 @@
-target:
-  group: na_prd
-  name: na-prd
-  deployment_root: /opt/delivery-template/na-prd
-  host_port: 8080
-  container_port: 80
-  restart_policy: always
-  healthcheck_path: /
-  extra_volumes: []
-  runtime_env: {}
+build_name: delivery-template-na-prd
+region_param: NA
+spring_profile: "na,prd"
 
-release:
-  app_name: delivery-template-app
-  image_name: delivery-template-app
-  dockerfile: Dockerfile
-  build_args:
-    REGION_PARAMETER: na
-  runtime_env:
-    TZ: America/Toronto
-    APP_REGION: na
-    APP_BASE_URL: https://na.example.com
-    SPRING_PROFILES_ACTIVE: na,prd
+docker_registry: ghcr.io
+dockerfile: Dockerfile
+
+target_servers:
+  - name: na-prd-app-1
+    host: na-prd-app-1.example.internal
+    extra_env:
+      APM_TARGET_NAME: DELIVERY_TEMPLATE_NA_PRD_01
+  - name: na-prd-app-2
+    host: na-prd-app-2.example.internal
+    extra_env:
+      APM_TARGET_NAME: DELIVERY_TEMPLATE_NA_PRD_02
+
+port_mapping: "8080:80"
+deployment_root: /opt/delivery-template/na-prd
+restart_policy: always
+
+extra_volumes:
+  - /var/log/delivery-template:/app/log
+
+extra_env:
+  TZ: America/Toronto
+  APP_REGION: na
+  APP_BASE_URL: https://na.example.com
+
+health_check_port: 8080
+health_check_path: /
+stabilize_seconds: 15

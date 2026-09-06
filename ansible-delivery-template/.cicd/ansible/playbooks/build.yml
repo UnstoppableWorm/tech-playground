@@ -1,4 +1,6 @@
 ---
+# Shared build template. Country/environment files provide build_name,
+# docker_registry, dockerfile, and optional region_param.
 - name: Build and push a country-specific release image
   hosts: localhost
   connection: local
@@ -7,7 +9,7 @@
     registry_username: "{{ lookup('ansible.builtin.env', 'REGISTRY_USERNAME') }}"
     registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
     resolved_project_root: "{{ project_root | default(playbook_dir ~ '/../../..', true) }}"
-    # The build runs on localhost, unlike the remote deployment playbook.
+    # The build runs on localhost, unlike the SSH-based deployment playbook.
     ansible_remote_tmp: "{{ resolved_project_root }}/.ansible/remote_tmp"
   pre_tasks:
     - name: Validate selected country, environment, and image version
@@ -15,21 +17,21 @@
         that:
           - pipeline.country == country
           - deployment_environment.code == deploy_env
-          - release.app_name | length > 0
-          - container_registry.host | default('') | length > 0
-          - container_registry.namespace | default('') | length > 0
-          - release.image_name | length > 0
+          - build_name | default('') | length > 0
+          - docker_registry | default('') | length > 0
+          - registry_namespace | default('') | length > 0
+          - dockerfile | default('Dockerfile', true) | length > 0
           - image_version | default('') is match('^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
           - registry_username | default('') | length > 0
           - registry_token | default('') | length > 0
-        fail_msg: Check country, deploy environment, image_version, registry settings, and registry credentials.
+        fail_msg: Check country, deploy environment, image version, registry settings, and registry credentials.
   tasks:
     - name: Resolve the immutable versioned image name
       ansible.builtin.set_fact:
-        release_repository: "{{ container_registry.host | lower }}/{{ container_registry.namespace | lower }}/{{ release.image_name | lower }}"
-        release_image: "{{ container_registry.host | lower }}/{{ container_registry.namespace | lower }}/{{ release.image_name | lower }}:{{ image_version }}"
+        release_repository: "{{ docker_registry | lower }}/{{ registry_namespace | lower }}/{{ build_name | lower }}"
+        release_image: "{{ docker_registry | lower }}/{{ registry_namespace | lower }}/{{ build_name | lower }}:{{ image_version }}"
         release_revision: "{{ image_revision | default(image_version, true) }}"
-        resolved_dockerfile_path: "{{ resolved_project_root }}/{{ release.dockerfile | default('Dockerfile', true) }}"
+        resolved_dockerfile_path: "{{ resolved_project_root }}/{{ dockerfile | default('Dockerfile', true) }}"
 
     - name: Ensure the Docker build context exists
       ansible.builtin.stat:
@@ -54,7 +56,7 @@
         argv:
           - docker
           - login
-          - "{{ container_registry.host }}"
+          - "{{ docker_registry }}"
           - --username
           - "{{ registry_username }}"
           - --password-stdin
@@ -103,6 +105,11 @@
           - --build-arg
           - "APP_VERSION={{ image_version }}"
 
+    - name: Add the regional Docker build argument
+      ansible.builtin.set_fact:
+        docker_build_argv: "{{ docker_build_argv + ['--build-arg', 'REGION_PARAMETER=' ~ region_param] }}"
+      when: region_param | default('', true) | length > 0
+
     - name: Add the source repository label when available
       ansible.builtin.set_fact:
         docker_build_argv: >-
@@ -114,17 +121,6 @@
               ]
           }}
       when: image_source | default('', true) | length > 0
-
-    - name: Add country-specific Docker build arguments
-      ansible.builtin.set_fact:
-        docker_build_argv: >-
-          {{
-            docker_build_argv
-            + ['--build-arg', item.key ~ '=' ~ (item.value | string)]
-          }}
-      loop: "{{ release.build_args | default({}) | dict2items }}"
-      loop_control:
-        label: "{{ item.key }}"
 
     - name: Add the Docker build context
       ansible.builtin.set_fact:

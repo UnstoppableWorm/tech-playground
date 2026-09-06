@@ -1,8 +1,9 @@
 ---
-# Included by deploy.yml once for every VM in the selected target group.
+# Included by deploy.yml once for every server declared in target_servers.
+# The target is reached through SSH; Docker Remote API port 2375 is not exposed.
 - name: Announce the requested image for the current target
   ansible.builtin.debug:
-    msg: "Deploying {{ release_image }} to {{ country }}/{{ deploy_env }} on {{ inventory_hostname }}."
+    msg: "Deploying {{ release_image }} to {{ country }}/{{ deploy_env }} on {{ deployment_target_name }}."
 
 - name: Verify Docker is available on the target VM
   ansible.builtin.command:
@@ -16,11 +17,11 @@
     argv:
       - docker
       - login
-      - "{{ container_registry.host }}"
+      - "{{ docker_registry }}"
       - --username
       - "{{ registry_username }}"
       - --password-stdin
-  stdin: "{{ registry_token }}"
+    stdin: "{{ registry_token }}"
   no_log: true
   changed_when: true
 
@@ -90,7 +91,7 @@
 
 - name: Ensure deployment directory exists
   ansible.builtin.file:
-    path: "{{ deployment_root }}"
+    path: "{{ deployment_root_path }}"
     state: directory
     mode: "0755"
 
@@ -99,21 +100,21 @@
     merged_runtime_env: >-
       {{
         {
-          'APP_NAME': release.app_name,
+          'APP_NAME': build_name,
           'APP_COUNTRY': country,
           'APP_ENV': deploy_env,
           'IMAGE_VERSION': image_version,
-          'RELEASE_IMAGE': release_image
+          'RELEASE_IMAGE': release_image,
+          'SPRING_PROFILES_ACTIVE': spring_profile
         }
         | combine(deployment_environment.runtime_env | default({}))
-        | combine(release.runtime_env | default({}))
-        | combine(target.runtime_env | default({}))
-        | combine(hostvars[inventory_hostname].runtime_env | default({}))
+        | combine(extra_env | default({}))
+        | combine(server_extra_env | default({}))
       }}
     resolved_extra_volumes: >-
       {{
-        (target.extra_volumes | default([]))
-        + (hostvars[inventory_hostname].extra_volumes | default([]))
+        (extra_volumes | default([]))
+        + (server_extra_volumes | default([]))
       }}
 
 - name: Render the version-pinned Compose manifest
@@ -140,20 +141,20 @@
         ]
       }}
   args:
-    chdir: "{{ deployment_root }}"
+    chdir: "{{ deployment_root_path }}"
   changed_when: true
 
 - name: Wait for the recreated service port
   ansible.builtin.wait_for:
     host: 127.0.0.1
-    port: "{{ target.host_port }}"
+    port: "{{ health_check_port }}"
     state: started
     delay: 2
     timeout: 120
 
 - name: Wait for the new release health endpoint
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ target.host_port }}{{ target.healthcheck_path }}"
+    url: "http://127.0.0.1:{{ health_check_port }}{{ health_check_path | default('/') }}"
     method: GET
     status_code: 200
   register: deployment_healthcheck
@@ -195,13 +196,13 @@
   when: deployment_environment.docker_image_prune | bool
   changed_when: true
 
-- name: Stabilize before the next production target
+- name: Stabilize before the next target server
   ansible.builtin.pause:
-    seconds: "{{ deployment_environment.stabilize_seconds | default(0) | int }}"
+    seconds: "{{ stabilize_seconds | default(0) | int }}"
   when:
-    - deployment_environment.stabilize_seconds | default(0) | int > 0
+    - stabilize_seconds | default(0) | int > 0
     - inventory_hostname != (ansible_play_hosts_all | last)
 
 - name: Report the deployed image version
   ansible.builtin.debug:
-    msg: "Deployed {{ release_image }} to {{ country }}/{{ deploy_env }} on {{ inventory_hostname }}."
+    msg: "Deployed {{ release_image }} to {{ country }}/{{ deploy_env }} on {{ deployment_target_name }}."
