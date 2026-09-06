@@ -112,7 +112,7 @@ stabilize_seconds: 15
 
 `build.yml`은 지정된 이미지 태그와 dangling 이미지를 정리한 뒤, 권역별 `REGION_PARAMETER`, 버전, Git revision OCI label을 넣어 이미지를 빌드합니다. 그 다음 `ghcr.io/<owner>/<build_name>:v1.<run>`에 push합니다.
 
-`deploy.yml`은 `target_servers`를 SSH runtime inventory로 등록합니다. `deploy_single_server.yml`은 각 VM에서 GHCR 로그인, 명시된 불변 태그 pull, Compose 파일 렌더링과 컨테이너 재생성, 포트/HTTP 헬스체크, 이전 이미지 제거, 다음 서버 전 안정화 대기를 수행합니다. Docker Remote API 포트는 열지 않고 SSH로만 VM Docker를 실행합니다.
+`deploy.yml`은 Environment 시크릿으로 받은 SSH 키와 known-hosts를 runner 임시 경로에 안전하게 준비하고, `target_servers`를 SSH runtime inventory로 등록합니다. `deploy_single_server.yml`은 각 VM에서 GHCR 로그인, 명시된 불변 태그 pull, Compose 파일 렌더링과 컨테이너 재생성, 포트/HTTP 헬스체크, 이전 이미지 제거, 다음 서버 전 안정화 대기를 수행합니다. Docker Remote API 포트는 열지 않고 SSH로만 VM Docker를 실행합니다.
 
 빌드는 runner Docker CLI를 사용하고, 배포는 `docker compose`와 legacy `docker-compose`를 자동 선택합니다. 따라서 VM의 Docker/Compose 세대가 달라도 같은 플레이북을 재사용할 수 있습니다.
 

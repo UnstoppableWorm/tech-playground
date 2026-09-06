@@ -14,6 +14,14 @@
         | default(lookup('ansible.builtin.env', 'GITHUB_REPOSITORY_OWNER'), true)
       }}
     dynamic_target_group: "delivery_{{ country }}_{{ deploy_env }}"
+    deployment_ssh_private_key: "{{ lookup('ansible.builtin.env', 'SSH_PRIVATE_KEY') }}"
+    deployment_ssh_known_hosts: "{{ lookup('ansible.builtin.env', 'SSH_KNOWN_HOSTS') }}"
+    controller_runtime_dir: >-
+      {{
+        lookup('ansible.builtin.env', 'RUNNER_TEMP')
+        | default(lookup('ansible.builtin.env', 'TMPDIR'), true)
+        | default('/tmp', true)
+      }}
   vars_files:
     - "{{ playbook_dir }}/../vars/environments/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
     - "{{ playbook_dir }}/../vars/regions/{{ lookup('ansible.builtin.env', 'DEPLOY_COUNTRY') | lower }}/{{ lookup('ansible.builtin.env', 'DEPLOY_ENV') | lower }}.yml"
@@ -36,8 +44,38 @@
           - deployment_ssh is defined
           - deployment_ssh.user | default('', true) | length > 0
           - deployment_ssh.port | default(0, true) | int > 0
-        fail_msg: Check country, deploy environment, registry settings, and target_servers.
+          - deployment_ssh_private_key | length > 0
+          - deployment_ssh_known_hosts | length > 0
+        fail_msg: Check country, deploy environment, registry settings, target_servers, and deployment SSH secrets.
   tasks:
+    - name: Create protected controller SSH material directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: "{{ controller_runtime_dir }}"
+        prefix: ansible-deploy-
+      register: controller_ssh_directory
+      no_log: true
+
+    - name: Write the deployment private key on the controller
+      ansible.builtin.copy:
+        content: "{{ deployment_ssh_private_key | trim }}\n"
+        dest: "{{ controller_ssh_directory.path }}/id_rsa"
+        mode: "0600"
+      no_log: true
+
+    - name: Write known hosts on the controller
+      ansible.builtin.copy:
+        content: "{{ deployment_ssh_known_hosts | trim }}\n"
+        dest: "{{ controller_ssh_directory.path }}/known_hosts"
+        mode: "0600"
+      no_log: true
+
+    - name: Save the controller SSH material paths
+      ansible.builtin.set_fact:
+        controller_ssh_material_directory: "{{ controller_ssh_directory.path }}"
+        controller_ssh_private_key_file: "{{ controller_ssh_directory.path }}/id_rsa"
+        controller_ssh_known_hosts_file: "{{ controller_ssh_directory.path }}/known_hosts"
+
     - name: Add each configured server to the runtime inventory
       ansible.builtin.add_host:
         name: "{{ item.name | default(item.host, true) }}"
@@ -45,6 +83,10 @@
         ansible_host: "{{ item.host }}"
         ansible_user: "{{ deployment_ssh.user }}"
         ansible_port: "{{ deployment_ssh.port }}"
+        ansible_ssh_private_key_file: "{{ controller_ssh_private_key_file }}"
+        ansible_ssh_common_args: >-
+          -o UserKnownHostsFile={{ controller_ssh_known_hosts_file }}
+          -o StrictHostKeyChecking=yes
         deployment_target_name: "{{ item.name | default(item.host, true) }}"
         server_extra_env: "{{ item.extra_env | default({}) }}"
         server_extra_volumes: "{{ item.extra_volumes | default([]) }}"
@@ -107,3 +149,15 @@
 
     - name: Deploy the current target server
       ansible.builtin.include_tasks: deploy_single_server.yml
+
+- name: Remove controller SSH material after deployment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Remove the temporary deployment SSH directory
+      ansible.builtin.file:
+        path: "{{ controller_ssh_material_directory }}"
+        state: absent
+      when: controller_ssh_material_directory is defined
+      no_log: true
