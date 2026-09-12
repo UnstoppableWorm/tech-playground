@@ -1,0 +1,12 @@
+---
+common:
+  application_name: delivery-template
+
+build:
+  dockerfile: Dockerfile
+  arguments:
+    APP_VERSION: "{{ image_version }}"
+  labels:
+    org.opencontainers.image.source: https://github.com/UnstoppableWorm/tech-playground
+    org.opencontainers.image.version: "{{ image_version }}"
+    org.opencontainers.image.revision: "{{ release_revision }}"

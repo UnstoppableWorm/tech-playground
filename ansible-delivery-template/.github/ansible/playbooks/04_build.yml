@@ -1,0 +1,40 @@
+---
+# Stage 04: build the application image on the runner Docker engine.
+- name: Build a country-specific release image locally
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Load the selected delivery context
+      ansible.builtin.include_tasks: ../tasks/load_delivery_context.yml
+
+    - name: Remove an existing local image with the requested version
+      community.docker.docker_image:
+        name: "{{ common.release_repository }}"
+        tag: "{{ image_version }}"
+        state: absent
+        force_absent: true
+
+    - name: Remove dangling local images before the build
+      community.docker.docker_prune:
+        images: true
+        images_filters:
+          dangling: true
+
+    - name: Build the immutable versioned image locally
+      community.docker.docker_image:
+        name: "{{ common.release_repository }}"
+        tag: "{{ image_version }}"
+        state: present
+        source: build
+        force_source: true
+        build:
+          path: "{{ project_root }}"
+          dockerfile: "{{ build.dockerfile }}"
+          pull: true
+          args: "{{ build.arguments }}"
+          labels: "{{ build.labels }}"
+
+    - name: Report the local image version
+      ansible.builtin.debug:
+        msg: "Built {{ common.release_image }} for {{ country }}/{{ deploy_env }} on the runner Docker engine."

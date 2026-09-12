@@ -1,0 +1,38 @@
+name: kr-stg-mac-mini-ansible-cicd
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kr-stg-mac-mini-cicd
+  cancel-in-progress: false
+
+jobs:
+  delivery:
+    name: Validate, test, build, and deploy
+    runs-on: [self-hosted, Linux, ARM64, mac-mini-dind, kr, stg]
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ansible-delivery-template
+    steps:
+      - name: Check out the requested revision
+        uses: actions/checkout@v4
+        with:
+          clean: true
+          persist-credentials: false
+
+      - name: Validate delivery configuration
+        run: ansible-playbook .github/ansible/playbooks/02_validate.yml
+
+      - name: Test the application
+        run: ansible-playbook .github/ansible/playbooks/03_test.yml
+
+      - name: Build the application image
+        run: ansible-playbook .github/ansible/playbooks/04_build.yml
+
+      - name: Deploy on the runner Docker engine
+        run: ansible-playbook .github/ansible/playbooks/05_deploy.yml

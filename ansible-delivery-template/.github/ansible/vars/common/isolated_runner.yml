@@ -1,0 +1,18 @@
+---
+isolated_runner:
+  repository_url: https://github.com/UnstoppableWorm/tech-playground
+  version: "2.337.0"
+  linux_arm64_sha256: 9b1dc70626422526e3c94767cf024896beb15da5342a3f4819bf2feac13e0393
+  labels: mac-mini-dind,kr,stg
+  boundary:
+    image: docker:29.2.0-dind
+    container_name: tech-playground-runner-boundary
+    data_volume: tech-playground-runner-boundary-data
+    engine_port: 23750
+    docker_host: "tcp://127.0.0.1:{{ isolated_runner.boundary.engine_port }}"
+  runner:
+    image_repository: tech-playground-actions-runner
+    image: "{{ isolated_runner.runner.image_repository }}:{{ isolated_runner.version }}"
+    container_name: tech-playground-actions-runner
+    bootstrap_container_name: tech-playground-actions-runner-bootstrap
+    state_volume: tech-playground-actions-runner-state
