@@ -1,0 +1,123 @@
+---
+- name: Read PostgreSQL rollup group count
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - SELECT count(*) FROM olap.agg_person_organ_disease;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_postgres_rollup_groups
+  changed_when: false
+
+- name: Read ClickHouse rollup group count
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - clickhouse
+      - clickhouse-client
+      - --user
+      - olap
+      - --password
+      - olap
+      - --query
+      - >-
+        SELECT count() FROM
+        (
+          SELECT bucket_date, person_id, organ_code, disease_code
+          FROM olap_clickhouse.agg_person_organ_disease
+          GROUP BY bucket_date, person_id, organ_code, disease_code
+        )
+        FORMAT TabSeparatedRaw
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_clickhouse_rollup_groups
+  changed_when: false
+
+- name: Read coverage checkpoints
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - >-
+        SELECT pipeline || '|' || to_char(covered_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+        FROM olap.aggregation_checkpoint
+        WHERE model_key = 'medical-history'
+          AND view_key = 'person-organ-disease-daily'
+        ORDER BY pipeline;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_checkpoints
+  changed_when: false
+
+- name: Require both safe hybrid coverage checkpoints
+  ansible.builtin.assert:
+    that:
+      - "'CLICKHOUSE|' + lab_covered_until in lab_checkpoints.stdout_lines"
+      - "'SPRING_BATCH|' + lab_covered_until in lab_checkpoints.stdout_lines"
+    fail_msg: "One or more hybrid read checkpoints are missing."
+
+- name: Write preparation result
+  ansible.builtin.copy:
+    dest: "{{ lab_result_dir }}/preparation-result.json"
+    mode: "0644"
+    content: >-
+      {{ {
+        'generatedAtUtc': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'),
+        'rowCount': lab_row_count | int,
+        'seedChunkSize': lab_seed_chunk_size | int,
+        'coveredUntil': lab_covered_until,
+        'clickHouseStrategy': lab_clickhouse_strategy,
+        'clickHouseBlockSize': lab_clickhouse_block_size | int,
+        'activeClickHouseRollupViews': lab_active_rollup_views.stdout | trim | int,
+        'rawSignature': lab_raw_signature.stdout | trim,
+        'postgresCoveredRawSignature': lab_covered_raw_signature.stdout | trim,
+        'postgresRollupSignature': lab_postgres_rollup_signature.stdout | trim,
+        'clickHouseRollupSignature': lab_clickhouse_rollup_signature.stdout | trim,
+        'postgresRollupGroups': lab_postgres_rollup_groups.stdout | trim | int,
+        'clickHouseRollupGroups': lab_clickhouse_rollup_groups.stdout | trim | int,
+        'seedDuration': lab_seed_result.delta,
+        'postgresBatchLauncherDuration': lab_postgres_rollup_result.delta,
+        'postgresBatchJobMillis': lab_postgres_batch_job_millis | int,
+        'clickHouseSyncSeconds': lab_clickhouse_sync_seconds | int,
+        'kafkaLagSnapshot': lab_kafka_lag_snapshot.stdout_lines,
+        'checkpoints': lab_checkpoints.stdout_lines
+      } | to_nice_json }}
+
+- name: Show prepared data summary
+  ansible.builtin.debug:
+    msg:
+      result_file: "{{ lab_result_dir }}/preparation-result.json"
+      raw_signature: "{{ lab_raw_signature.stdout | trim }}"
+      postgres_rollup_groups: "{{ lab_postgres_rollup_groups.stdout | trim }}"
+      clickhouse_rollup_groups: "{{ lab_clickhouse_rollup_groups.stdout | trim }}"
+      checkpoints: "{{ lab_checkpoints.stdout_lines }}"

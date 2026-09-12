@@ -1,0 +1,16 @@
+---
+- name: Benchmark OLAP GraphQL read paths
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../vars/lab.yml"
+
+  tasks:
+    - name: Run local environment preflight
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/preflight.yml"
+
+    - name: Verify prepared benchmark state
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/benchmark-preflight.yml"
+
+    - name: Run GraphQL benchmark and collect reports
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/benchmark.yml"

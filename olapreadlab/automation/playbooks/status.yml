@@ -1,0 +1,13 @@
+---
+- name: Inspect OLAP read performance lab
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../vars/lab.yml"
+
+  tasks:
+    - name: Run local environment preflight
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/preflight.yml"
+
+    - name: Read infrastructure and data status
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/status.yml"

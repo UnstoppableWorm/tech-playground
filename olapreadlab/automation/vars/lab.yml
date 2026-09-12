@@ -1,0 +1,39 @@
+lab_project_dir: "{{ playbook_dir }}/../.."
+lab_compose_file: "{{ lab_project_dir }}/compose.yaml"
+lab_result_dir: "{{ lab_project_dir }}/build/automation"
+
+# A small default keeps the first local run practical. Use 100000000 for the fixed experiment.
+lab_row_count: 1000000
+lab_seed_chunk_size: 100000
+# Keep a raw tail so hybrid modes exercise both the rollup and PostgreSQL raw paths.
+lab_covered_until: "2025-10-01T00:00:00Z"
+
+lab_clickhouse_strategy: leaf
+lab_clickhouse_block_size: 100000
+lab_wait_timeout_seconds: 7200
+lab_poll_interval_seconds: 5
+lab_min_free_disk_gb: 10
+
+# The preparation playbook never removes existing volumes unless this is explicitly true.
+lab_reset_volumes: false
+
+lab_benchmark_result_dir: "{{ lab_project_dir }}/build/benchmark"
+lab_benchmark_model: medical-history
+lab_benchmark_view: person-organ-disease-daily
+lab_benchmark_from_inclusive: "2025-01-01T00:00:00Z"
+lab_benchmark_to_exclusive: "2026-01-01T00:00:00Z"
+lab_benchmark_modes:
+  - POSTGRES_RAW
+  - POSTGRES_BATCH_HYBRID
+  - CLICKHOUSE_HYBRID
+lab_benchmark_windows:
+  - ONE_DAY
+  - ONE_MONTH
+  - ONE_YEAR
+  - ALL
+lab_benchmark_warmup_count: 3
+lab_benchmark_measurement_count: 10
+lab_benchmark_random_seed: 20260907
+lab_benchmark_server_port: 18080
+lab_benchmark_request_timeout: 30m
+lab_benchmark_timeout_seconds: 14400

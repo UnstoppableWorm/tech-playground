@@ -16,7 +16,8 @@ public record OlapGraphQlRow(
 						.map(entry -> new OlapGraphQlValue(entry.getKey(), entry.getValue().toString()))
 						.toList(),
 				row.measures().entrySet().stream()
-						.map(entry -> new OlapGraphQlValue(entry.getKey(), entry.getValue().toPlainString()))
+						.map(entry -> new OlapGraphQlValue(
+								entry.getKey(), entry.getValue().stripTrailingZeros().toPlainString()))
 						.toList());
 	}
 }

@@ -1,0 +1,32 @@
+---
+- name: Reset OLAP read performance lab volumes
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../vars/lab.yml"
+
+  tasks:
+    - name: Require explicit reset confirmation
+      ansible.builtin.assert:
+        that:
+          - lab_reset_volumes | bool
+        fail_msg: >-
+          This removes all PostgreSQL, Kafka, and ClickHouse lab data.
+          Re-run with -e lab_reset_volumes=true.
+
+    - name: Run local environment preflight
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/preflight.yml"
+
+    - name: Remove containers and experiment volumes
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --file
+          - "{{ lab_compose_file }}"
+          - down
+          - --volumes
+          - --remove-orphans
+      args:
+        chdir: "{{ lab_project_dir }}"
+      changed_when: true

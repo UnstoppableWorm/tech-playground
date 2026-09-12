@@ -1,0 +1,28 @@
+---
+- name: Prepare OLAP read performance lab
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../vars/lab.yml"
+
+  tasks:
+    - name: Run local environment preflight
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/preflight.yml"
+
+    - name: Start clean experiment infrastructure
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/infrastructure.yml"
+
+    - name: Configure ClickHouse ingestion shape
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/configure-clickhouse.yml"
+
+    - name: Seed deterministic PostgreSQL raw data
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/seed.yml"
+
+    - name: Build PostgreSQL rollup with Spring Batch
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/postgres-rollup.yml"
+
+    - name: Transfer raw changes and build ClickHouse rollup
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/clickhouse-sync.yml"
+
+    - name: Verify both prepared read paths
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/verify.yml"

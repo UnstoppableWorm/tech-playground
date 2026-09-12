@@ -1,0 +1,95 @@
+---
+- name: Validate experiment variables
+  ansible.builtin.assert:
+    that:
+      - lab_row_count | int > 0
+      - lab_seed_chunk_size | int > 0
+      - lab_seed_chunk_size | int <= lab_row_count | int
+      - lab_clickhouse_strategy in ['leaf', 'dedicated']
+      - lab_clickhouse_block_size | int in [10000, 100000, 1000000]
+      - lab_wait_timeout_seconds | int > 0
+      - lab_poll_interval_seconds | int > 0
+      - lab_min_free_disk_gb | int > 0
+      - lab_covered_until is match('^\\d{4}-\\d{2}-\\d{2}T00:00:00Z$')
+    fail_msg: "Invalid OLAP lab variables; check automation/vars/lab.yml and -e overrides."
+
+- name: Check required project files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ lab_compose_file }}"
+    - "{{ lab_project_dir }}/gradlew"
+    - "{{ lab_project_dir }}/infra/clickhouse/init/020-rollups.sql"
+  register: lab_required_files
+
+- name: Require project files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+    fail_msg: "Required project file is missing: {{ item.item }}"
+  loop: "{{ lab_required_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check Docker client
+  ansible.builtin.command:
+    argv: [docker, --version]
+  changed_when: false
+
+- name: Check Docker Compose plugin
+  ansible.builtin.command:
+    argv: [docker, compose, version]
+  changed_when: false
+
+- name: Check Docker daemon
+  ansible.builtin.command:
+    argv: [docker, info]
+  register: lab_docker_info
+  changed_when: false
+  failed_when: false
+
+- name: Require a running Docker daemon
+  ansible.builtin.assert:
+    that:
+      - lab_docker_info.rc == 0
+    fail_msg: >-
+      Docker is installed but its daemon is not reachable. Start Docker Desktop
+      (or the local Docker service) and run the playbook again.
+
+- name: Validate Compose configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - config
+      - --quiet
+  args:
+    chdir: "{{ lab_project_dir }}"
+  changed_when: false
+
+- name: Check Gradle and Java toolchain
+  ansible.builtin.command:
+    argv: [./gradlew, --version]
+  args:
+    chdir: "{{ lab_project_dir }}"
+  changed_when: false
+
+- name: Read available filesystem capacity
+  ansible.builtin.command:
+    argv: [df, -Pk, "{{ lab_project_dir }}"]
+  register: lab_disk
+  changed_when: false
+
+- name: Calculate available disk space
+  ansible.builtin.set_fact:
+    lab_free_disk_kb: "{{ (lab_disk.stdout_lines | last).split()[3] | int }}"
+
+- name: Require configured free disk space
+  ansible.builtin.assert:
+    that:
+      - lab_free_disk_kb | int >= (lab_min_free_disk_gb | int * 1024 * 1024)
+    fail_msg: >-
+      Insufficient free disk for this run: {{ lab_free_disk_kb | int // 1024 // 1024 }} GiB available,
+      {{ lab_min_free_disk_gb }} GiB required. The 100M-row experiment should use a much larger explicit threshold.

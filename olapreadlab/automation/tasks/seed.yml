@@ -1,0 +1,57 @@
+---
+- name: Render deterministic raw data generator
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/seed-medical-history.sql.j2"
+    dest: "{{ lab_result_dir }}/seed-medical-history.sql"
+    mode: "0644"
+
+- name: Generate and load PostgreSQL raw data
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+  args:
+    chdir: "{{ lab_project_dir }}"
+    stdin: "{{ lookup('ansible.builtin.file', lab_result_dir + '/seed-medical-history.sql') }}"
+  register: lab_seed_result
+  changed_when: true
+
+- name: Verify seeded raw row count
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - SELECT count(*) FROM olap.medical_history;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_seeded_rows
+  changed_when: false
+
+- name: Require exact seed size
+  ansible.builtin.assert:
+    that:
+      - lab_seeded_rows.stdout | trim | int == lab_row_count | int
+    fail_msg: "PostgreSQL raw row count does not match lab_row_count."

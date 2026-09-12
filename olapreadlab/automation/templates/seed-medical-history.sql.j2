@@ -1,0 +1,37 @@
+\set ON_ERROR_STOP on
+\timing on
+
+TRUNCATE TABLE olap.medical_history, olap.agg_person_organ_disease;
+DELETE FROM olap.aggregation_checkpoint
+WHERE model_key = 'medical-history';
+
+DROP INDEX IF EXISTS olap.medical_history_occurred_at_idx;
+
+-- Each generated statement commits independently in psql, limiting one transaction to one seed chunk.
+SELECT format($statement$
+    INSERT INTO olap.medical_history
+        (event_id, person_id, organ_code, disease_code, occurred_at, metric_value, updated_at)
+    SELECT
+        sequence AS event_id,
+        1 + mod(sequence - 1, 10000000) AS person_id,
+        1 + mod(sequence * 7, 20) AS organ_code,
+        1 + mod(sequence * 13 + sequence / 1000, 500) AS disease_code,
+        TIMESTAMPTZ '2025-01-01 00:00:00+00'
+            + mod(sequence - 1, 365) * INTERVAL '1 day'
+            + mod(sequence * 17, 86400) * INTERVAL '1 second' AS occurred_at,
+        1 + mod(sequence * 31, 10000) AS metric_value,
+        TIMESTAMPTZ '2026-01-01 00:00:00+00' AS updated_at
+    FROM generate_series(%s::bigint, %s::bigint) AS source(sequence);
+$statement$, range_start, least(range_start + {{ lab_seed_chunk_size | int }} - 1, {{ lab_row_count | int }}))
+FROM generate_series(1, {{ lab_row_count | int }}, {{ lab_seed_chunk_size | int }}) AS ranges(range_start)
+\gexec
+
+CREATE INDEX medical_history_occurred_at_idx
+    ON olap.medical_history (occurred_at);
+
+ANALYZE olap.medical_history;
+
+SELECT count(*) AS seeded_row_count,
+       min(event_id) AS min_event_id,
+       max(event_id) AS max_event_id
+FROM olap.medical_history;

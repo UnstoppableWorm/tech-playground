@@ -361,6 +361,15 @@ Docker Compose가 다음 서비스를 동일한 버전과 설정으로 관리한
 - Debezium Connect 3.6: PostgreSQL source connector 실행
 - ClickHouse 26.3: CDC 원본, 집계 테이블과 Materialized View
 
+Docker/Compose 상태 검사부터 인프라 기동, 가변 크기 raw seed, Spring Batch rollup,
+Debezium 등록, ClickHouse checksum 대기와 checkpoint 갱신까지 한 번에 준비하려면
+[`automation/README.md`](automation/README.md)의 Ansible playbook을 사용한다.
+
+준비된 세 조회 경로의 GraphQL end-to-end 지연은 `automation/playbooks/benchmark.yml`로
+측정한다. runner는 범위·모드 실행 순서를 섞고 warm-up을 분리한 뒤 p50/p95/p99와
+응답 SHA-256을 JSON/CSV로 기록한다. 빈 환경부터 한 번에 실행하려면
+`automation/playbooks/full-benchmark.yml`을 사용한다.
+
 PostgreSQL은 Debezium이 logical replication slot을 사용할 수 있도록 `wal_level=logical`로 시작한다. Kafka는 로컬 실험용 단일 KRaft combined 노드이며 운영 구성의 성능이나 가용성을 대표하지 않는다.
 
 ```shell

@@ -1,0 +1,136 @@
+---
+- name: Remove previous experiment volumes when requested
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - down
+      - --volumes
+      - --remove-orphans
+  args:
+    chdir: "{{ lab_project_dir }}"
+  when: lab_reset_volumes | bool
+  changed_when: true
+
+- name: Start data services and wait for health checks
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - up
+      - --detach
+      - --wait
+      - --wait-timeout
+      - "{{ lab_wait_timeout_seconds | string }}"
+      - postgres
+      - kafka
+      - clickhouse
+      - debezium-connect
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_compose_up
+  changed_when: true
+
+- name: Read existing PostgreSQL raw row count
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - SELECT count(*) FROM olap.medical_history;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_existing_postgres_rows
+  changed_when: false
+
+- name: Verify Spring Batch metadata schema
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - SELECT (to_regclass('olap.batch_job_instance') IS NOT NULL)::int;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_batch_schema_present
+  changed_when: false
+
+- name: Require Spring Batch metadata schema
+  ansible.builtin.assert:
+    that:
+      - lab_batch_schema_present.stdout | trim | int == 1
+    fail_msg: >-
+      Spring Batch metadata tables are missing. This normally means the PostgreSQL volume predates
+      infra/postgres/init/020-spring-batch.sql; recreate lab volumes explicitly.
+
+- name: Read existing ClickHouse change row count
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - clickhouse
+      - clickhouse-client
+      - --user
+      - olap
+      - --password
+      - olap
+      - --query
+      - SELECT count() FROM olap_clickhouse.medical_history_changes FORMAT TabSeparatedRaw
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_existing_clickhouse_rows
+  changed_when: false
+
+- name: Read registered Debezium connectors
+  ansible.builtin.uri:
+    url: http://localhost:8083/connectors
+    method: GET
+    return_content: true
+    status_code: 200
+  register: lab_existing_connectors
+
+- name: Require an empty experiment data plane
+  ansible.builtin.assert:
+    that:
+      - lab_existing_postgres_rows.stdout | trim | int == 0
+      - lab_existing_clickhouse_rows.stdout | trim | int == 0
+      - "'olap-postgres' not in lab_existing_connectors.json"
+    fail_msg: >-
+      Existing experiment data or the olap-postgres connector was found. To prevent accidental data loss,
+      prepare.yml will not overwrite it. Inspect with status.yml, or explicitly add -e lab_reset_volumes=true.
+
+- name: Create automation result directory
+  ansible.builtin.file:
+    path: "{{ lab_result_dir }}"
+    state: directory
+    mode: "0755"

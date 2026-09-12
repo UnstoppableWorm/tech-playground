@@ -1,0 +1,91 @@
+---
+- name: Validate benchmark variables
+  ansible.builtin.assert:
+    that:
+      - lab_benchmark_model | length > 0
+      - lab_benchmark_view | length > 0
+      - lab_benchmark_from_inclusive is match('^\d{4}-\d{2}-\d{2}T00:00:00Z$')
+      - lab_benchmark_to_exclusive is match('^\d{4}-\d{2}-\d{2}T00:00:00Z$')
+      - lab_benchmark_from_inclusive < lab_covered_until
+      - lab_covered_until < lab_benchmark_to_exclusive
+      - lab_benchmark_modes | length > 0
+      - lab_benchmark_modes | unique | list | length == lab_benchmark_modes | length
+      - lab_benchmark_windows | length > 0
+      - lab_benchmark_windows | unique | list | length == lab_benchmark_windows | length
+      - lab_benchmark_warmup_count | int >= 0
+      - lab_benchmark_measurement_count | int > 0
+      - lab_benchmark_server_port | int > 0
+      - lab_benchmark_server_port | int < 65536
+      - lab_benchmark_timeout_seconds | int > 0
+    fail_msg: "Invalid benchmark variables; inspect automation/vars/lab.yml and -e overrides."
+
+- name: Start benchmark data stores and wait for health checks
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - up
+      - --detach
+      - --wait
+      - --wait-timeout
+      - "{{ lab_wait_timeout_seconds | string }}"
+      - postgres
+      - clickhouse
+  args:
+    chdir: "{{ lab_project_dir }}"
+  changed_when: false
+
+- name: Read prepared raw rows and coverage checkpoints
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - >-
+        SELECT 'raw|' || count(*) FROM olap.medical_history;
+        SELECT pipeline || '|' || to_char(covered_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+        FROM olap.aggregation_checkpoint
+        WHERE model_key = '{{ lab_benchmark_model }}'
+          AND view_key = '{{ lab_benchmark_view }}'
+        ORDER BY pipeline;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_benchmark_prepared_state
+  changed_when: false
+
+- name: Require prepared and covered read paths
+  ansible.builtin.assert:
+    that:
+      - "'raw|' + (lab_row_count | string) in lab_benchmark_prepared_state.stdout_lines"
+      - "'CLICKHOUSE|' + lab_covered_until in lab_benchmark_prepared_state.stdout_lines"
+      - "'SPRING_BATCH|' + lab_covered_until in lab_benchmark_prepared_state.stdout_lines"
+    fail_msg: >-
+      Prepared data does not match the requested benchmark. Run prepare.yml first with the same
+      lab_row_count and lab_covered_until values; use an explicit reset only when data deletion is intended.
+
+- name: Require the benchmark HTTP port to be free
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ lab_benchmark_server_port | int }}"
+    state: stopped
+    timeout: 1
+    msg: "Benchmark port {{ lab_benchmark_server_port }} is already in use."
+
+- name: Create benchmark result directory
+  ansible.builtin.file:
+    path: "{{ lab_benchmark_result_dir }}"
+    state: directory
+    mode: "0755"

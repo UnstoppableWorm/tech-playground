@@ -1,0 +1,79 @@
+---
+- name: Apply ClickHouse Kafka block size
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - clickhouse
+      - clickhouse-client
+      - --user
+      - olap
+      - --password
+      - olap
+      - --multiquery
+    stdin: >-
+      {{ lookup('ansible.builtin.file', lab_project_dir + '/infra/clickhouse/scenarios/block-size-' +
+         (lab_clickhouse_block_size | string) + '.sql') }}
+  args:
+    chdir: "{{ lab_project_dir }}"
+  changed_when: true
+
+- name: Apply ClickHouse rollup strategy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - clickhouse
+      - clickhouse-client
+      - --user
+      - olap
+      - --password
+      - olap
+      - --multiquery
+    stdin: >-
+      {{ lookup('ansible.builtin.file', lab_project_dir + '/infra/clickhouse/scenarios/' +
+         lab_clickhouse_strategy + '-only.sql') }}
+  args:
+    chdir: "{{ lab_project_dir }}"
+  changed_when: true
+
+- name: Count active ClickHouse rollup views
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - clickhouse
+      - clickhouse-client
+      - --user
+      - olap
+      - --password
+      - olap
+      - --query
+      - >-
+        SELECT count() FROM system.tables
+        WHERE database = 'olap_clickhouse'
+        AND engine = 'MaterializedView'
+        AND name LIKE 'mv_%'
+        FORMAT TabSeparatedRaw
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_active_rollup_views
+  changed_when: false
+
+- name: Verify ClickHouse rollup view count
+  ansible.builtin.assert:
+    that:
+      - lab_active_rollup_views.stdout | trim | int == (1 if lab_clickhouse_strategy == 'leaf' else 8)
+    fail_msg: "ClickHouse strategy {{ lab_clickhouse_strategy }} has an unexpected active MV count."

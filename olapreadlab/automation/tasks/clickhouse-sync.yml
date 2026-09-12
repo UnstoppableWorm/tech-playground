@@ -1,0 +1,150 @@
+---
+- name: Record ClickHouse transfer start time
+  ansible.builtin.command:
+    argv: [date, +%s]
+  register: lab_clickhouse_started_at
+  changed_when: false
+
+- name: Register the PostgreSQL Debezium connector
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - run
+      - --rm
+      - debezium-register
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_connector_registration
+  changed_when: true
+
+- name: Wait for Debezium connector tasks
+  ansible.builtin.uri:
+    url: http://localhost:8083/connectors/olap-postgres/status
+    method: GET
+    return_content: true
+    status_code: 200
+  register: lab_connector_status
+  until:
+    - lab_connector_status.json.connector.state == 'RUNNING'
+    - lab_connector_status.json.tasks | map(attribute='state') | unique | list == ['RUNNING']
+  retries: "{{ ((lab_wait_timeout_seconds | int) / (lab_poll_interval_seconds | int)) | round(0, 'ceil') | int }}"
+  delay: "{{ lab_poll_interval_seconds | int }}"
+
+- name: Read complete PostgreSQL raw checksum
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - >-
+        SELECT count(*)::text || '|' || coalesce(sum(metric_value), 0)::text
+        FROM olap.medical_history;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_raw_signature
+  changed_when: false
+
+- name: Wait for ClickHouse leaf rollup checksum
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - clickhouse
+      - clickhouse-client
+      - --user
+      - olap
+      - --password
+      - olap
+      - --query
+      - >-
+        SELECT concat(toString(sum(event_count)), '|', toString(sum(metric_sum)))
+        FROM olap_clickhouse.agg_person_organ_disease
+        FORMAT TabSeparatedRaw
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_clickhouse_rollup_signature
+  changed_when: false
+  until: lab_clickhouse_rollup_signature.stdout | trim == lab_raw_signature.stdout | trim
+  retries: "{{ ((lab_wait_timeout_seconds | int) / (lab_poll_interval_seconds | int)) | round(0, 'ceil') | int }}"
+  delay: "{{ lab_poll_interval_seconds | int }}"
+
+- name: Read ClickHouse consumer lag snapshot
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - kafka
+      - /kafka/bin/kafka-consumer-groups.sh
+      - --bootstrap-server
+      - kafka:9092
+      - --describe
+      - --group
+      - clickhouse-medical-history-v1
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_kafka_lag_snapshot
+  changed_when: false
+  failed_when: false
+
+- name: Advance ClickHouse coverage checkpoint after checksum match
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -c
+      - >-
+        INSERT INTO olap.aggregation_checkpoint
+            (model_key, view_key, pipeline, covered_until, completed_at)
+        VALUES
+            ('medical-history', 'person-organ-disease-daily', 'CLICKHOUSE',
+             TIMESTAMPTZ '{{ lab_covered_until }}', clock_timestamp())
+        ON CONFLICT (model_key, view_key, pipeline) DO UPDATE
+        SET covered_until = EXCLUDED.covered_until,
+            completed_at = EXCLUDED.completed_at;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  changed_when: true
+
+- name: Record ClickHouse transfer end time
+  ansible.builtin.command:
+    argv: [date, +%s]
+  register: lab_clickhouse_finished_at
+  changed_when: false
+
+- name: Calculate ClickHouse synchronization duration
+  ansible.builtin.set_fact:
+    lab_clickhouse_sync_seconds: >-
+      {{ (lab_clickhouse_finished_at.stdout | int) - (lab_clickhouse_started_at.stdout | int) }}

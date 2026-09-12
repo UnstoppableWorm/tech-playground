@@ -1,0 +1,98 @@
+---
+- name: Create benchmark run identifier
+  ansible.builtin.set_fact:
+    lab_benchmark_run_id: "{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
+
+- name: Resolve benchmark report paths
+  ansible.builtin.set_fact:
+    lab_benchmark_output_file: >-
+      {{ lab_benchmark_result_dir }}/benchmark-{{ lab_benchmark_run_id }}.json
+    lab_benchmark_csv_file: >-
+      {{ lab_benchmark_result_dir }}/benchmark-{{ lab_benchmark_run_id }}.csv
+
+- name: Run randomized GraphQL benchmark
+  ansible.builtin.command:
+    argv:
+      - ./gradlew
+      - --no-daemon
+      - bootRun
+      - >-
+        --args=--spring.profiles.active=docker
+        --spring.batch.job.enabled=false
+        --server.port={{ lab_benchmark_server_port }}
+        --benchmark.enabled=true
+        --benchmark.endpoint=http://127.0.0.1:{{ lab_benchmark_server_port }}/graphql
+        --benchmark.output={{ lab_benchmark_output_file }}
+        --benchmark.model={{ lab_benchmark_model }}
+        --benchmark.view={{ lab_benchmark_view }}
+        --benchmark.from-inclusive={{ lab_benchmark_from_inclusive }}
+        --benchmark.to-exclusive={{ lab_benchmark_to_exclusive }}
+        --benchmark.covered-until={{ lab_covered_until }}
+        --benchmark.source-row-count={{ lab_row_count }}
+        --benchmark.click-house-strategy={{ lab_clickhouse_strategy }}
+        --benchmark.click-house-block-size={{ lab_clickhouse_block_size }}
+        --benchmark.modes={{ lab_benchmark_modes | join(',') }}
+        --benchmark.windows={{ lab_benchmark_windows | join(',') }}
+        --benchmark.warmup-count={{ lab_benchmark_warmup_count }}
+        --benchmark.measurement-count={{ lab_benchmark_measurement_count }}
+        --benchmark.random-seed={{ lab_benchmark_random_seed }}
+        --benchmark.request-timeout={{ lab_benchmark_request_timeout }}
+  args:
+    chdir: "{{ lab_project_dir }}"
+  async: "{{ lab_benchmark_timeout_seconds | int }}"
+  poll: "{{ lab_poll_interval_seconds | int }}"
+  register: lab_benchmark_process
+  changed_when: true
+
+- name: Verify benchmark report files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ lab_benchmark_output_file }}"
+    - "{{ lab_benchmark_csv_file }}"
+  register: lab_benchmark_report_files
+
+- name: Require JSON and CSV benchmark reports
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.size | int > 0
+    fail_msg: "Benchmark report was not created: {{ item.item }}"
+  loop: "{{ lab_benchmark_report_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Read benchmark result
+  ansible.builtin.set_fact:
+    lab_benchmark_report: "{{ lookup('ansible.builtin.file', lab_benchmark_output_file) | from_json }}"
+
+- name: Require equivalent results from every query mode
+  ansible.builtin.assert:
+    that:
+      - lab_benchmark_report.equivalent | bool
+      - lab_benchmark_report.consistencyErrors | length == 0
+      - lab_benchmark_report.results | length == (lab_benchmark_modes | length) * (lab_benchmark_windows | length)
+    fail_msg: "Benchmark responses are not equivalent across query modes."
+
+- name: Update latest JSON benchmark report
+  ansible.builtin.copy:
+    src: "{{ lab_benchmark_output_file }}"
+    dest: "{{ lab_benchmark_result_dir }}/latest.json"
+    remote_src: true
+    mode: "0644"
+
+- name: Update latest CSV benchmark report
+  ansible.builtin.copy:
+    src: "{{ lab_benchmark_csv_file }}"
+    dest: "{{ lab_benchmark_result_dir }}/latest.csv"
+    remote_src: true
+    mode: "0644"
+
+- name: Show benchmark summary
+  ansible.builtin.debug:
+    msg:
+      json_report: "{{ lab_benchmark_output_file }}"
+      csv_report: "{{ lab_benchmark_csv_file }}"
+      elapsed_millis: "{{ lab_benchmark_report.elapsedMillis }}"
+      equivalent: "{{ lab_benchmark_report.equivalent }}"
+      results: "{{ lab_benchmark_report.results }}"

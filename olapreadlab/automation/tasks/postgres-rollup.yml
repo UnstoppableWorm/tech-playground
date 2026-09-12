@@ -1,0 +1,117 @@
+---
+- name: Build PostgreSQL rollup through Spring Batch
+  ansible.builtin.command:
+    argv:
+      - ./gradlew
+      - --no-daemon
+      - bootRun
+      - >-
+        --args=--spring.profiles.active=docker
+        --spring.main.web-application-type=none
+        --spring.batch.job.enabled=true
+        --spring.batch.job.name=medicalHistoryRollupJob
+        coveredUntil={{ lab_covered_until }}
+        jobRunId={{ now(utc=true, fmt='%Y%m%d%H%M%S%f') }}
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_postgres_rollup_result
+  changed_when: true
+
+- name: Read Spring Batch execution result
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - >-
+        SELECT execution.status || '|' ||
+               round(extract(epoch FROM (execution.end_time - execution.start_time)) * 1000)::bigint
+        FROM batch_job_execution AS execution
+        JOIN batch_job_instance AS instance
+          ON instance.job_instance_id = execution.job_instance_id
+        WHERE instance.job_name = 'medicalHistoryRollupJob'
+        ORDER BY execution.job_execution_id DESC
+        LIMIT 1;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_postgres_batch_execution
+  changed_when: false
+
+- name: Require a completed Spring Batch execution
+  ansible.builtin.assert:
+    that:
+      - lab_postgres_batch_execution.stdout is match('^COMPLETED\\|[0-9]+$')
+    fail_msg: "The latest medicalHistoryRollupJob execution did not complete successfully."
+
+- name: Extract Spring Batch job duration
+  ansible.builtin.set_fact:
+    lab_postgres_batch_job_millis: >-
+      {{ (lab_postgres_batch_execution.stdout | trim).split('|')[1] | int }}
+
+- name: Read raw checksum for the covered range
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - >-
+        SELECT count(*)::text || '|' || coalesce(sum(metric_value), 0)::text
+        FROM olap.medical_history
+        WHERE occurred_at < TIMESTAMPTZ '{{ lab_covered_until }}';
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_covered_raw_signature
+  changed_when: false
+
+- name: Read PostgreSQL rollup checksum
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - >-
+        SELECT coalesce(sum(event_count), 0)::text || '|' || coalesce(sum(metric_sum), 0)::text
+        FROM olap.agg_person_organ_disease;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_postgres_rollup_signature
+  changed_when: false
+
+- name: Verify PostgreSQL rollup checksum
+  ansible.builtin.assert:
+    that:
+      - lab_postgres_rollup_signature.stdout | trim == lab_covered_raw_signature.stdout | trim
+    fail_msg: "Spring Batch rollup does not match PostgreSQL raw data in the covered range."

@@ -1,0 +1,84 @@
+---
+- name: Read Compose service status
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - ps
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_status_compose
+  changed_when: false
+
+- name: Read PostgreSQL data counts
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - postgres
+      - psql
+      - -X
+      - -U
+      - olap
+      - -d
+      - olap_lab
+      - -Atqc
+      - >-
+        SELECT 'raw=' || count(*) FROM olap.medical_history;
+        SELECT 'postgres_rollup=' || count(*) FROM olap.agg_person_organ_disease;
+        SELECT 'checkpoint=' || pipeline || '|' || covered_until
+        FROM olap.aggregation_checkpoint
+        ORDER BY pipeline;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_status_postgres
+  changed_when: false
+
+- name: Read ClickHouse data counts
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ lab_compose_file }}"
+      - exec
+      - -T
+      - clickhouse
+      - clickhouse-client
+      - --user
+      - olap
+      - --password
+      - olap
+      - --multiquery
+      - --query
+      - >-
+        SELECT concat('changes=', toString(count()))
+        FROM olap_clickhouse.medical_history_changes;
+        SELECT concat('clickhouse_rollup_parts=', toString(count()))
+        FROM olap_clickhouse.agg_person_organ_disease;
+  args:
+    chdir: "{{ lab_project_dir }}"
+  register: lab_status_clickhouse
+  changed_when: false
+
+- name: Read Debezium connector status
+  ansible.builtin.uri:
+    url: http://localhost:8083/connectors/olap-postgres/status
+    method: GET
+    return_content: true
+    status_code: [200, 404]
+  register: lab_status_connector
+
+- name: Show lab status
+  ansible.builtin.debug:
+    msg:
+      compose: "{{ lab_status_compose.stdout_lines }}"
+      postgres: "{{ lab_status_postgres.stdout_lines }}"
+      clickhouse: "{{ lab_status_clickhouse.stdout_lines }}"
+      connector: "{{ lab_status_connector.json | default({'status': 'not-registered'}) }}"
