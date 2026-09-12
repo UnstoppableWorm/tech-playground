@@ -1,0 +1,7 @@
+---
+validate:
+  countries: [kr, eu, na]
+  environments: [stg, prd]
+  restart_policies: [always, unless-stopped, on-failure, "no"]
+  image_version_pattern: '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
+  port_mapping_pattern: '^[0-9]{1,5}:[0-9]{1,5}$'

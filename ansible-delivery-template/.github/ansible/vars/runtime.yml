@@ -1,7 +1,0 @@
----
-# This image is intentionally independent of country and deployment environment.
-# It is the controller runtime used by every delivery stage.
-runtime_image_repository: ghcr.io/unstoppableworm/ansible-delivery-runtime
-runtime_image_source: https://github.com/UnstoppableWorm/tech-playground
-runtime_build_context: .github/ansible
-runtime_dockerfile: runtime/Dockerfile

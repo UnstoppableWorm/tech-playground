@@ -1,0 +1,142 @@
+---
+# Stage 05: register every selected local target and deploy them sequentially.
+- name: Register country-specific targets on the runner Docker engine
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Load the selected delivery context
+      ansible.builtin.include_tasks: ../tasks/load_delivery_context.yml
+
+    - name: Register each configured deployment target
+      ansible.builtin.add_host:
+        name: "{{ common.release_repository }}-{{ item.name }}"
+        groups: local_delivery_targets
+        ansible_connection: local
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+        deployment_target_name: "{{ item.name }}"
+        deployed_container_name: "{{ common.release_repository }}-{{ item.name }}"
+        deployment_network_name: "{{ common.release_repository }}-{{ item.name }}-network"
+        target_port_mapping: "{{ item.port_mapping }}"
+        target_environment: "{{ item.environment }}"
+        target_volumes: "{{ item.volumes }}"
+        target_country: "{{ country }}"
+        target_deploy_env: "{{ deploy_env }}"
+        target_image_version: "{{ image_version }}"
+        target_release_image: "{{ common.release_image }}"
+        target_application_name: "{{ common.application_name }}"
+        target_spring_profile: "{{ deploy.spring_profile }}"
+        target_restart_policy: "{{ deploy.restart_policy }}"
+        target_common_environment: "{{ deploy.environment }}"
+        target_common_volumes: "{{ deploy.volumes }}"
+        target_remove_previous_image: "{{ deploy.cleanup.remove_previous_image }}"
+        target_docker_image_prune: "{{ deploy.cleanup.prune_dangling_images }}"
+        target_stabilize_seconds: "{{ deploy.stabilize_seconds }}"
+      loop: "{{ deploy.targets }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+- name: Deploy every selected target on the runner Docker engine
+  hosts: local_delivery_targets
+  connection: local
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Read the requested local image ID
+      community.docker.docker_image_info:
+        name: "{{ target_release_image }}"
+      register: requested_image
+      failed_when: requested_image.images | length == 0
+
+    - name: Read the current target container image ID
+      community.docker.docker_container_info:
+        name: "{{ deployed_container_name }}"
+      register: current_target_container
+
+    - name: Resolve the target runtime values
+      ansible.builtin.set_fact:
+        runtime_container_env: >-
+          {{
+            {
+              'DEPLOYMENT_TARGET': deployment_target_name,
+              'DEPLOYMENT_COUNTRY': target_country,
+              'DEPLOYMENT_ENVIRONMENT': target_deploy_env,
+              'RELEASE_IMAGE': target_release_image,
+              'IMAGE_VERSION': target_image_version,
+              'APP_NAME': target_application_name,
+              'APP_COUNTRY': target_country,
+              'APP_ENV': target_deploy_env,
+              'SPRING_PROFILES_ACTIVE': target_spring_profile
+            }
+            | combine(target_common_environment)
+            | combine(target_environment)
+          }}
+        resolved_volumes: "{{ target_common_volumes + target_volumes }}"
+
+    - name: Ensure the target service network exists
+      community.docker.docker_network:
+        name: "{{ deployment_network_name }}"
+        state: present
+
+    - name: Replace the target service container
+      community.docker.docker_container:
+        name: "{{ deployed_container_name }}"
+        image: "{{ target_release_image }}"
+        state: started
+        detach: true
+        recreate: true
+        pull: never
+        restart_policy: "{{ target_restart_policy }}"
+        env: "{{ runtime_container_env }}"
+        published_ports:
+          - "{{ target_port_mapping }}"
+        volumes: "{{ resolved_volumes }}"
+        labels:
+          deployment.country: "{{ target_country }}"
+          deployment.environment: "{{ target_deploy_env }}"
+          deployment.target: "{{ deployment_target_name }}"
+          deployment.image-version: "{{ target_image_version }}"
+        networks:
+          - name: "{{ deployment_network_name }}"
+        networks_cli_compatible: true
+
+    - name: Wait for Docker to report the target as healthy
+      community.docker.docker_container_info:
+        name: "{{ deployed_container_name }}"
+      register: deployment_healthcheck
+      retries: 18
+      delay: 5
+      until:
+        - deployment_healthcheck.exists
+        - deployment_healthcheck.container.State.Health.Status == 'healthy'
+
+    - name: Remove the previous target image after deployment
+      community.docker.docker_image:
+        name: "{{ current_target_container.container.Image }}"
+        state: absent
+      failed_when: false
+      when:
+        - target_remove_previous_image | bool
+        - current_target_container.exists
+        - current_target_container.container.Image != requested_image.images[0].Id
+
+    - name: Prune stale dangling images according to environment policy
+      community.docker.docker_prune:
+        images: true
+        images_filters:
+          dangling: true
+          until: 168h
+      when: target_docker_image_prune | bool
+
+    - name: Stabilize before the next target
+      ansible.builtin.pause:
+        seconds: "{{ target_stabilize_seconds | int }}"
+      when:
+        - target_stabilize_seconds | int > 0
+        - inventory_hostname != (ansible_play_hosts_all | last)
+
+    - name: Report the deployed target
+      ansible.builtin.debug:
+        msg: >-
+          Deployed healthy container {{ target_release_image }} to
+          {{ target_country }}/{{ target_deploy_env }}/{{ deployment_target_name }}.

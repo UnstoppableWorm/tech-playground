@@ -1,0 +1,53 @@
+---
+- name: Resolve inventory-assigned delivery paths
+  ansible.builtin.set_fact:
+    project_root: "{{ playbook_dir | dirname | dirname | dirname }}"
+    country: "{{ delivery_scope.country }}"
+    deploy_env: "{{ delivery_scope.environment }}"
+
+- name: Read the checked-out source revision
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ project_root }}"
+      - rev-parse
+      - HEAD
+  register: checked_out_revision
+  changed_when: false
+  check_mode: false
+
+- name: Resolve immutable release metadata
+  ansible.builtin.set_fact:
+    release_revision: "{{ checked_out_revision.stdout }}"
+    image_version: "sha-{{ checked_out_revision.stdout[:12] }}"
+
+- name: Load the shared delivery configuration
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/../vars/common/delivery.yml"
+    name: shared_delivery_configuration
+
+- name: Load the selected country and environment configuration
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/../vars/regions/{{ country }}/{{ deploy_env }}.yml"
+    name: regional_delivery_configuration
+
+- name: Resolve the shared delivery configuration
+  ansible.builtin.set_fact:
+    common: "{{ shared_delivery_configuration.common }}"
+
+- name: Resolve common release metadata
+  ansible.builtin.set_fact:
+    common:
+      application_name: "{{ common.application_name }}"
+      release_repository: "{{ (common.application_name ~ '-' ~ country ~ '-' ~ deploy_env) | lower }}"
+      release_image: "{{ (common.application_name ~ '-' ~ country ~ '-' ~ deploy_env) | lower }}:{{ image_version }}"
+
+- name: Merge the shared and regional delivery configuration
+  ansible.builtin.set_fact:
+    build: >-
+      {{
+        shared_delivery_configuration.build
+        | combine(regional_delivery_configuration.build, recursive=true)
+      }}
+    deploy: "{{ regional_delivery_configuration.deploy }}"

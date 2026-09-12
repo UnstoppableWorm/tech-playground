@@ -21,4 +21,7 @@ USER delivery
 
 EXPOSE 8080
 
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=18 \
+  CMD ["wget", "-q", "-T", "3", "--spider", "http://127.0.0.1:8080/actuator/health"]
+
 ENTRYPOINT ["java", "-jar", "/app/delivery-service.jar"]

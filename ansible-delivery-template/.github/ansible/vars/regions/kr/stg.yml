@@ -1,28 +1,26 @@
-build_name: delivery-template-kr-stg
-region_param: KR
-spring_profile: "kr,stg"
+---
+build:
+  arguments:
+    REGION_PARAMETER: KR
 
-docker_registry: ghcr.io
-registry_namespace: unstoppableworm
-dockerfile: Dockerfile
-
-target_servers:
-  - name: kr-stg-app-1
-    host: kr-stg-app-1.example.internal
-    extra_env:
-      APM_TARGET_NAME: DELIVERY_TEMPLATE_KR_STG_01
-
-port_mapping: "18080:8080"
-restart_policy: unless-stopped
-
-extra_volumes:
-  - /var/log/delivery-template:/app/log
-
-extra_env:
-  TZ: Asia/Seoul
-  APP_REGION: kr
-  APP_BASE_URL: https://stg-kr.example.com
-
-health_check_port: 18080
-health_check_path: /actuator/health
-stabilize_seconds: 0
+deploy:
+  spring_profile: "kr,stg"
+  restart_policy: unless-stopped
+  stabilize_seconds: 0
+  cleanup:
+    remove_previous_image: true
+    prune_dangling_images: false
+  environment:
+    APP_RUNTIME_MODE: verification
+    LOG_LEVEL: DEBUG
+    TZ: Asia/Seoul
+    APP_REGION: kr
+    APP_BASE_URL: https://stg-kr.example.com
+  volumes:
+    - /var/log/delivery-template-kr-stg:/app/log
+  targets:
+    - name: app-1
+      port_mapping: "18080:8080"
+      environment:
+        APM_TARGET_NAME: DELIVERY_TEMPLATE_KR_STG_01
+      volumes: []

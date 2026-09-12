@@ -1,0 +1,48 @@
+---
+# Stage 03: test and package the application.
+# This stage deliberately uses argv-based commands rather than a shell script.
+# Maven owns unit tests; the packaged JAR owns the executable smoke test.
+- name: Test the Java service before building a country-specific release
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Load the selected delivery context
+      ansible.builtin.include_tasks: ../tasks/load_delivery_context.yml
+
+    - name: Run Java unit tests with Maven
+      ansible.builtin.command:
+        argv:
+          - mvn
+          - --batch-mode
+          - --no-transfer-progress
+          - test
+      args:
+        chdir: "{{ project_root }}"
+      changed_when: false
+
+    - name: Package the tested Java service as an executable JAR
+      ansible.builtin.command:
+        argv:
+          - mvn
+          - --batch-mode
+          - --no-transfer-progress
+          - -DskipTests
+          - package
+      args:
+        chdir: "{{ project_root }}"
+      changed_when: false
+
+    - name: Run the packaged service health smoke test
+      ansible.builtin.command:
+        argv:
+          - java
+          - -jar
+          - "{{ project_root }}/target/delivery-service.jar"
+          - --smoke-test
+      args:
+        chdir: "{{ project_root }}"
+      environment:
+        APP_COUNTRY: "{{ country }}"
+        APP_ENV: "{{ deploy_env }}"
+      changed_when: false

@@ -1,0 +1,163 @@
+---
+# Stage 01: one-time isolated runner bootstrap.
+- name: Create an isolated Docker-in-Docker Actions runner boundary
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../vars/common/isolated_runner.yml"
+  tasks:
+    - name: Resolve the repository root
+      ansible.builtin.set_fact:
+        project_root: "{{ playbook_dir | dirname | dirname | dirname }}"
+
+    - name: Read the assigned country and environment configuration
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/../vars/regions/{{ delivery_scope.country }}/{{ delivery_scope.environment }}.yml"
+      register: delivery_region_content
+
+    - name: Initialize the isolated boundary port mappings
+      ansible.builtin.set_fact:
+        configured_target_port_mappings: >-
+          {{
+            (delivery_region_content.content | b64decode | from_yaml).deploy.targets
+            | map(attribute='port_mapping') | list
+          }}
+        configured_target_host_ports: []
+        isolated_boundary_published_ports:
+          - "127.0.0.1:{{ isolated_runner.boundary.engine_port }}:2375"
+
+    - name: Publish each target port through the isolated boundary
+      ansible.builtin.set_fact:
+        isolated_boundary_published_ports: >-
+          {{
+            isolated_boundary_published_ports
+            + ['127.0.0.1:' + host_port + ':' + host_port]
+          }}
+        configured_target_host_ports: "{{ configured_target_host_ports + [host_port] }}"
+      vars:
+        host_port: "{{ item.split(':') | first }}"
+      loop: "{{ configured_target_port_mappings }}"
+      loop_control:
+        label: "{{ host_port }}"
+
+    - name: Reject host port collisions in the assigned environment
+      ansible.builtin.assert:
+        that:
+          - configured_target_host_ports | unique | length == configured_target_host_ports | length
+        fail_msg: Every target in the assigned environment must use a distinct host port.
+
+    - name: Create the isolated Docker engine data volume
+      community.docker.docker_volume:
+        name: "{{ isolated_runner.boundary.data_volume }}"
+        state: present
+
+    - name: Start the privileged Docker-in-Docker boundary
+      community.docker.docker_container:
+        name: "{{ isolated_runner.boundary.container_name }}"
+        image: "{{ isolated_runner.boundary.image }}"
+        state: started
+        privileged: true
+        restart_policy: unless-stopped
+        recreate: false
+        env:
+          DOCKER_TLS_CERTDIR: ""
+        command:
+          - --host=tcp://0.0.0.0:2375
+          - --host=unix:///var/run/docker.sock
+        volumes:
+          - "{{ isolated_runner.boundary.data_volume }}:/var/lib/docker"
+        published_ports: "{{ isolated_boundary_published_ports }}"
+        healthcheck:
+          test: [CMD, docker, info]
+          interval: 5s
+          timeout: 3s
+          retries: 20
+          start_period: 10s
+
+    - name: Wait for the isolated Docker API
+      community.docker.docker_host_info:
+        docker_host: "{{ isolated_runner.boundary.docker_host }}"
+      register: isolated_docker_info
+      retries: 30
+      delay: 2
+      until: isolated_docker_info is succeeded
+      changed_when: false
+
+    - name: Build the Linux ARM64 Actions runner inside the boundary
+      community.docker.docker_image:
+        docker_host: "{{ isolated_runner.boundary.docker_host }}"
+        name: "{{ isolated_runner.runner.image_repository }}"
+        tag: "{{ isolated_runner.version }}"
+        state: present
+        source: build
+        force_source: true
+        build:
+          path: "{{ project_root }}/.github/ansible"
+          dockerfile: runner/Dockerfile
+          pull: true
+          args:
+            RUNNER_VERSION: "{{ isolated_runner.version }}"
+            RUNNER_SHA256: "{{ isolated_runner.linux_arm64_sha256 }}"
+          labels:
+            org.opencontainers.image.source: "{{ isolated_runner.repository_url }}"
+            org.opencontainers.image.version: "{{ isolated_runner.version }}"
+            runner.boundary: dind
+
+    - name: Create the isolated runner state volume
+      community.docker.docker_volume:
+        docker_host: "{{ isolated_runner.boundary.docker_host }}"
+        name: "{{ isolated_runner.runner.state_volume }}"
+        state: present
+
+    - name: Remove a stale runner bootstrap container
+      community.docker.docker_container:
+        docker_host: "{{ isolated_runner.boundary.docker_host }}"
+        name: "{{ isolated_runner.runner.bootstrap_container_name }}"
+        state: absent
+      when: configure_runner | default(true) | bool
+      no_log: true
+
+    - name: Configure the repository runner in a one-shot container
+      community.docker.docker_container:
+        docker_host: "{{ isolated_runner.boundary.docker_host }}"
+        name: "{{ isolated_runner.runner.bootstrap_container_name }}"
+        image: "{{ isolated_runner.runner.image }}"
+        state: started
+        detach: false
+        cleanup: true
+        restart_policy: "no"
+        env:
+          RUNNER_MODE: configure
+          GITHUB_REPOSITORY_URL: "{{ isolated_runner.repository_url }}"
+          GITHUB_RUNNER_TOKEN: "{{ registration_token }}"
+          GITHUB_RUNNER_NAME: "{{ runner_name }}"
+          GITHUB_RUNNER_LABELS: "{{ isolated_runner.labels }}"
+        volumes:
+          - "{{ isolated_runner.runner.state_volume }}:/runner"
+      when: configure_runner | default(true) | bool
+      no_log: true
+
+    - name: Start the persistent runner without a registration token
+      community.docker.docker_container:
+        docker_host: "{{ isolated_runner.boundary.docker_host }}"
+        name: "{{ isolated_runner.runner.container_name }}"
+        image: "{{ isolated_runner.runner.image }}"
+        state: started
+        recreate: true
+        restart_policy: unless-stopped
+        env:
+          RUNNER_MODE: run
+        volumes:
+          - "{{ isolated_runner.runner.state_volume }}:/runner"
+          - /var/run/docker.sock:/var/run/docker.sock
+        etc_hosts:
+          host.docker.internal: host-gateway
+      when: configure_runner | default(true) | bool
+
+    - name: Report the isolated boundary status
+      ansible.builtin.debug:
+        msg: >-
+          DinD boundary {{ isolated_runner.boundary.container_name }} is ready.
+          Published ports: {{ isolated_boundary_published_ports | join(', ') }}.
+          Runner registration is {{ 'enabled' if configure_runner | default(true) | bool else 'skipped' }}.

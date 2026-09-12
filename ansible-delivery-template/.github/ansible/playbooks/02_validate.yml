@@ -1,0 +1,87 @@
+---
+# Stage 02: validate the inventory-assigned local delivery configuration.
+- name: Validate the complete delivery configuration before execution
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../vars/common/validate.yml"
+  tasks:
+    - name: Validate the local delivery assignment
+      ansible.builtin.assert:
+        that:
+          - delivery_scope is mapping
+          - delivery_scope.country in validate.countries
+          - delivery_scope.environment in validate.environments
+        fail_msg: The inventory delivery scope violates the delivery contract.
+
+    - name: Load the selected delivery context
+      ansible.builtin.include_tasks: ../tasks/load_delivery_context.yml
+
+    - name: Inspect required project files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ project_root }}/pom.xml"
+        - "{{ project_root }}/{{ build.dockerfile }}"
+      register: required_project_files
+
+    - name: Validate common configuration
+      ansible.builtin.assert:
+        that:
+          - image_version is match(validate.image_version_pattern)
+          - common.application_name | length > 0
+          - common.release_repository | length > 0
+          - common.release_image | length > 0
+        fail_msg: The common delivery configuration is invalid.
+
+    - name: Validate build configuration
+      ansible.builtin.assert:
+        that:
+          - build.dockerfile | length > 0
+          - build.arguments is mapping
+          - build.arguments.APP_VERSION == image_version
+          - build.arguments.REGION_PARAMETER | length > 0
+          - build.labels is mapping
+          - build.labels['org.opencontainers.image.source'] is match('^https://github.com/[^/]+/[^/]+$')
+          - build.labels['org.opencontainers.image.revision'] == release_revision
+          - required_project_files.results | map(attribute='stat.exists') | select('equalto', false) | list | length == 0
+        fail_msg: The build configuration is invalid.
+
+    - name: Validate deploy configuration
+      ansible.builtin.assert:
+        that:
+          - deploy.spring_profile | length > 0
+          - deploy.restart_policy in validate.restart_policies
+          - deploy.environment is mapping
+          - deploy.volumes is sequence
+          - deploy.cleanup.remove_previous_image is boolean
+          - deploy.cleanup.prune_dangling_images is boolean
+          - deploy.targets is sequence
+          - deploy.targets | length > 0
+          - deploy.stabilize_seconds | int >= 0
+          - deploy.targets | map(attribute='name') | list | unique | length == deploy.targets | length
+          - deploy.targets | map(attribute='port_mapping') | list | unique | length == deploy.targets | length
+        fail_msg: The deploy configuration is invalid.
+
+    - name: Validate every configured deployment target
+      ansible.builtin.assert:
+        that:
+          - item.name | length > 0
+          - item.port_mapping is match(validate.port_mapping_pattern)
+          - item.port_mapping.split(':') | first | int > 0
+          - item.port_mapping.split(':') | first | int < 65536
+          - item.port_mapping.split(':') | last | int > 0
+          - item.port_mapping.split(':') | last | int < 65536
+          - item.environment is mapping
+          - item.volumes is sequence
+        fail_msg: "Invalid deployment target: {{ item.name }}"
+      loop: "{{ deploy.targets }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Report the validated delivery configuration
+      ansible.builtin.debug:
+        msg: >-
+          Validated local runner delivery for {{ country }}/{{ deploy_env }}
+          with image version {{ image_version }}.
