@@ -3,20 +3,21 @@ name: regional-mac-mini-ansible-cicd
 on:
   workflow_dispatch:
     inputs:
-      country:
-        description: Deployment country / region
+      region:
+        description: 배포할 권역을 선택하세요
         required: true
         type: choice
         options:
-          - kr
-          - eu
-          - na
+          - 선택 필요
+          - 내수
+          - 유럽
+          - 북미
 
 permissions:
   contents: read
 
 concurrency:
-  group: regional-mac-mini-cicd-${{ inputs.country }}-${{ github.ref }}
+  group: regional-mac-mini-cicd-${{ inputs.region }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -26,7 +27,7 @@ jobs:
     timeout-minutes: 30
     env:
       DELIVERY_SCOPE_JSON: >-
-        {"delivery_scope":{"country":"${{ inputs.country }}","environment":"${{ github.ref_name == 'prd' && 'prd' || (github.ref_name == 'main' || github.ref_name == 'stg' || startsWith(github.ref_name, 'feature/')) && 'stg' || 'unsupported' }}"}}
+        {"delivery_scope":{"country":"${{ inputs.region == '내수' && 'kr' || inputs.region == '유럽' && 'eu' || inputs.region == '북미' && 'na' || 'unsupported' }}","environment":"${{ github.ref_name == 'prd' && 'prd' || (github.ref_name == 'main' || github.ref_name == 'stg' || startsWith(github.ref_name, 'feature/')) && 'stg' || 'unsupported' }}"}}
     defaults:
       run:
         working-directory: ansible-delivery-template
@@ -36,6 +37,12 @@ jobs:
         with:
           clean: true
           persist-credentials: false
+
+      - name: Require an explicit delivery region
+        if: inputs.region == '선택 필요'
+        run: |
+          echo "::error::내수, 유럽, 북미 중 배포할 권역을 선택해야 합니다."
+          exit 1
 
       - name: Validate delivery configuration
         run: ansible-playbook .github/ansible/playbooks/02_validate.yml --extra-vars "$DELIVERY_SCOPE_JSON"

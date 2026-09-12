@@ -49,7 +49,7 @@ tech-playground/
   -> 05_deploy.yml
 ~~~
 
-workflow를 수동 실행할 때 `kr`, `eu`, `na` 중 국가를 반드시 선택합니다. 배포 환경은 실행 브랜치에서 결정합니다. `prd`는 운영계, `main`, `stg`, `feature/*`는 검증계 설정을 사용하며 그 밖의 브랜치는 `02_validate.yml`에서 실패합니다. checkout한 Git SHA는 별도 입력 없이 이미지 버전으로 사용합니다.
+workflow를 수동 실행할 때 `내수`, `유럽`, `북미` 중 권역을 반드시 클릭해 선택합니다. 초기값인 `선택 필요`로는 테스트, 빌드, 배포를 시작할 수 없습니다. 선택한 값은 각각 `kr`, `eu`, `na` 설정으로 연결됩니다. 배포 환경은 실행 브랜치에서 결정합니다. `prd`는 운영계, `main`, `stg`, `feature/*`는 검증계 설정을 사용하며 그 밖의 브랜치는 `02_validate.yml`에서 실패합니다. checkout한 Git SHA는 별도 입력 없이 이미지 버전으로 사용합니다.
 
 실행 호스트가 한 Mac mini인 것과 배포 모델은 분리되어 있습니다. 서비스명과 소스 저장소처럼 모든 단계가 공유하는 값은 `vars/common/delivery.yml`의 `common`에 둡니다. `regions/{country}/{environment}.yml` 여섯 파일은 단계별 `build`, `deploy` 설정만 소유합니다. 현재 `deploy.targets`에는 환경별 `app-1` 한 개만 있지만 대상을 추가하면 `05_deploy.yml`이 동적 로컬 인벤토리로 등록해 한 대씩 순차 배포합니다. runner 설치 플레이북은 모든 국가와 환경의 target port를 모아 Mac loopback에 자동으로 노출합니다.
 
