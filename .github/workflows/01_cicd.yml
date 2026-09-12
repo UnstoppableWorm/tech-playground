@@ -1,13 +1,22 @@
-name: kr-stg-mac-mini-ansible-cicd
+name: regional-mac-mini-ansible-cicd
 
 on:
   workflow_dispatch:
+    inputs:
+      country:
+        description: Deployment country / region
+        required: true
+        type: choice
+        options:
+          - kr
+          - eu
+          - na
 
 permissions:
   contents: read
 
 concurrency:
-  group: kr-stg-mac-mini-cicd
+  group: regional-mac-mini-cicd-${{ inputs.country }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -15,6 +24,9 @@ jobs:
     name: Validate, test, build, and deploy
     runs-on: [self-hosted, Linux, ARM64, mac-mini-dind, kr, stg]
     timeout-minutes: 30
+    env:
+      DELIVERY_SCOPE_JSON: >-
+        {"delivery_scope":{"country":"${{ inputs.country }}","environment":"${{ github.ref_name == 'prd' && 'prd' || (github.ref_name == 'main' || github.ref_name == 'stg' || startsWith(github.ref_name, 'feature/')) && 'stg' || 'unsupported' }}"}}
     defaults:
       run:
         working-directory: ansible-delivery-template
@@ -26,13 +38,13 @@ jobs:
           persist-credentials: false
 
       - name: Validate delivery configuration
-        run: ansible-playbook .github/ansible/playbooks/02_validate.yml
+        run: ansible-playbook .github/ansible/playbooks/02_validate.yml --extra-vars "$DELIVERY_SCOPE_JSON"
 
       - name: Test the application
-        run: ansible-playbook .github/ansible/playbooks/03_test.yml
+        run: ansible-playbook .github/ansible/playbooks/03_test.yml --extra-vars "$DELIVERY_SCOPE_JSON"
 
       - name: Build the application image
-        run: ansible-playbook .github/ansible/playbooks/04_build.yml
+        run: ansible-playbook .github/ansible/playbooks/04_build.yml --extra-vars "$DELIVERY_SCOPE_JSON"
 
       - name: Deploy on the runner Docker engine
-        run: ansible-playbook .github/ansible/playbooks/05_deploy.yml
+        run: ansible-playbook .github/ansible/playbooks/05_deploy.yml --extra-vars "$DELIVERY_SCOPE_JSON"

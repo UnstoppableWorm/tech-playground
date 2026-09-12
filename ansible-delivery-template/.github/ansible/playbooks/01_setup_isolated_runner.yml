@@ -11,21 +11,24 @@
       ansible.builtin.set_fact:
         project_root: "{{ playbook_dir | dirname | dirname | dirname }}"
 
-    - name: Read the assigned country and environment configuration
-      ansible.builtin.slurp:
-        src: "{{ playbook_dir }}/../vars/regions/{{ delivery_scope.country }}/{{ delivery_scope.environment }}.yml"
-      register: delivery_region_content
-
     - name: Initialize the isolated boundary port mappings
       ansible.builtin.set_fact:
-        configured_target_port_mappings: >-
-          {{
-            (delivery_region_content.content | b64decode | from_yaml).deploy.targets
-            | map(attribute='port_mapping') | list
-          }}
+        configured_target_port_mappings: []
         configured_target_host_ports: []
         isolated_boundary_published_ports:
           - "127.0.0.1:{{ isolated_runner.boundary.engine_port }}:2375"
+
+    - name: Collect target ports from every regional delivery configuration
+      ansible.builtin.set_fact:
+        configured_target_port_mappings: >-
+          {{
+            configured_target_port_mappings
+            + ((lookup('ansible.builtin.file', item) | from_yaml).deploy.targets
+              | map(attribute='port_mapping') | list)
+          }}
+      loop: "{{ query('ansible.builtin.fileglob', playbook_dir + '/../vars/regions/*/*.yml') }}"
+      loop_control:
+        label: "{{ item | basename }}"
 
     - name: Publish each target port through the isolated boundary
       ansible.builtin.set_fact:
@@ -41,11 +44,11 @@
       loop_control:
         label: "{{ host_port }}"
 
-    - name: Reject host port collisions in the assigned environment
+    - name: Reject host port collisions across delivery configurations
       ansible.builtin.assert:
         that:
           - configured_target_host_ports | unique | length == configured_target_host_ports | length
-        fail_msg: Every target in the assigned environment must use a distinct host port.
+        fail_msg: Every local delivery target must use a distinct host port.
 
     - name: Create the isolated Docker engine data volume
       community.docker.docker_volume:

@@ -49,9 +49,9 @@ tech-playground/
   -> 05_deploy.yml
 ~~~
 
-Mac mini의 inventory는 이 실행 노드를 `kr/stg` 전용으로 배정합니다. workflow는 별도 입력 없이 수동 실행하며, checkout한 Git SHA로 이미지 버전을 생성한 뒤 항상 내수 검증계 설정을 사용합니다. 지원하지 않는 inventory 배정은 `02_validate.yml`에서 실패합니다.
+workflow를 수동 실행할 때 `kr`, `eu`, `na` 중 국가를 반드시 선택합니다. 배포 환경은 실행 브랜치에서 결정합니다. `prd`는 운영계, `main`, `stg`, `feature/*`는 검증계 설정을 사용하며 그 밖의 브랜치는 `02_validate.yml`에서 실패합니다. checkout한 Git SHA는 별도 입력 없이 이미지 버전으로 사용합니다.
 
-실행 호스트가 한 Mac mini인 것과 배포 모델은 분리되어 있습니다. 서비스명과 소스 저장소처럼 모든 단계가 공유하는 값은 `vars/common/delivery.yml`의 `common`에 둡니다. `regions/{country}/{environment}.yml` 여섯 파일은 단계별 `build`, `deploy` 설정만 소유합니다. 현재 `deploy.targets`에는 `app-1` 한 개만 있지만 대상을 추가하면 `05_deploy.yml`이 동적 로컬 인벤토리로 등록해 한 대씩 순차 배포합니다. runner 설치 플레이북은 모든 target port를 모아 Mac loopback에 자동으로 노출합니다.
+실행 호스트가 한 Mac mini인 것과 배포 모델은 분리되어 있습니다. 서비스명과 소스 저장소처럼 모든 단계가 공유하는 값은 `vars/common/delivery.yml`의 `common`에 둡니다. `regions/{country}/{environment}.yml` 여섯 파일은 단계별 `build`, `deploy` 설정만 소유합니다. 현재 `deploy.targets`에는 환경별 `app-1` 한 개만 있지만 대상을 추가하면 `05_deploy.yml`이 동적 로컬 인벤토리로 등록해 한 대씩 순차 배포합니다. runner 설치 플레이북은 모든 국가와 환경의 target port를 모아 Mac loopback에 자동으로 노출합니다.
 
 ~~~yaml
 build:
@@ -104,9 +104,10 @@ Mac 터미널에서 직접 build/deploy를 확인할 때만 격리 Docker API를
 
 ~~~bash
 export DOCKER_HOST=tcp://127.0.0.1:23750
+export DELIVERY_SCOPE_JSON='{"delivery_scope":{"country":"kr","environment":"stg"}}'
 
-ansible-playbook .github/ansible/playbooks/02_validate.yml
-ansible-playbook .github/ansible/playbooks/03_test.yml
-ansible-playbook .github/ansible/playbooks/04_build.yml
-ansible-playbook .github/ansible/playbooks/05_deploy.yml
+ansible-playbook .github/ansible/playbooks/02_validate.yml --extra-vars "$DELIVERY_SCOPE_JSON"
+ansible-playbook .github/ansible/playbooks/03_test.yml --extra-vars "$DELIVERY_SCOPE_JSON"
+ansible-playbook .github/ansible/playbooks/04_build.yml --extra-vars "$DELIVERY_SCOPE_JSON"
+ansible-playbook .github/ansible/playbooks/05_deploy.yml --extra-vars "$DELIVERY_SCOPE_JSON"
 ~~~
